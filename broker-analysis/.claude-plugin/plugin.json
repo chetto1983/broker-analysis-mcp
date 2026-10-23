@@ -1,0 +1,12 @@
+{
+  "name": "broker-analysis",
+  "version": "0.1.0",
+  "description": "Read-only financial analysis on Yahoo Finance data: risk, fundamentals, technicals, ETFs and parametric analyses with alert hooks, plus the skills that teach the agent to read every number.",
+  "author": {
+    "name": "Davide Marchetto"
+  },
+  "homepage": "https://github.com/chetto1983/broker-analysis-mcp",
+  "repository": "https://github.com/chetto1983/broker-analysis-mcp",
+  "license": "MIT",
+  "keywords": ["finance", "mcp", "risk", "fundamentals", "technical-analysis", "etf", "yfinance"]
+}

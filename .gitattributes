@@ -1,0 +1,3 @@
+# Store everything LF and check out LF on every platform.
+* text=auto eol=lf
+*.png binary

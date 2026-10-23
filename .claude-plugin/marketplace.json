@@ -1,0 +1,16 @@
+{
+  "name": "broker-analysis-mcp",
+  "owner": {
+    "name": "Davide Marchetto"
+  },
+  "metadata": {
+    "description": "A read-only financial analysis MCP server for analysts, packaged with its skills."
+  },
+  "plugins": [
+    {
+      "name": "broker-analysis",
+      "source": "./broker-analysis",
+      "description": "Read-only financial analysis on Yahoo Finance data, with the skills that teach the agent to read every number."
+    }
+  ]
+}
