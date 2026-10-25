@@ -41,7 +41,7 @@ def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: s
 def utc_offset(timezone: str) -> timedelta | None:
     try:
         return datetime.now(ZoneInfo(timezone)).utcoffset()
-    except (ZoneInfoNotFoundError, ValueError):
+    except (ZoneInfoNotFoundError, ValueError, OSError):
         return None
 
 

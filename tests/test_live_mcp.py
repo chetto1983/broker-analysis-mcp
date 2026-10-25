@@ -122,6 +122,7 @@ def test_server_exposes_its_tools(live) -> None:
         [
             "risk_metrics", "technical_indicators", "fundamental_ratios", "peer_comparison", "etf_analysis",
             "list_indicator_catalog", "custom_analysis", "create_hook", "list_hooks", "run_hooks", "delete_hook",
+            "portfolio_risk", "model_status", "analysis_record",
         ]
     )
 

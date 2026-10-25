@@ -6,16 +6,16 @@ warnings. The model interprets them; it never computes a metric itself.
 
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
-from . import analysis, hooks, workbench
+from . import analysis, audit, hooks, portfolio, workbench
 from .catalog import SpecError
 from .data import DataError
-from .models import ConditionSpec, HookAction, IndicatorSpec, LevelSpec, SeriesSpec
+from .models import ConditionSpec, HookAction, IndicatorSpec, LevelSpec, Position, SeriesSpec, StressScenario
 
 INSTRUCTIONS = (
     "Read-only financial analysis on Yahoo Finance data (prototype, unofficial source). "
@@ -56,6 +56,44 @@ def risk_metrics(
     as a decimal (0.03 = 3%).
     """
     return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence)
+
+
+@server.tool(annotations=WRITES_HOOKS)
+def portfolio_risk(
+    positions: list[Position], portfolio_value: float, base_currency: str = "EUR", period: str = "5y",
+    confidence: float = 0.975, scenarios: list[StressScenario] | None = None,
+) -> dict:
+    """Portfolio risk with signed market values in each ticker's quote currency (GBP not GBp).
+
+    portfolio_value is positive total NAV in base currency, including cash. Supply values as of
+    the returned common valuation date. Cash is the NAV minus converted exposures, earning zero.
+    Supports linear cash securities, including short exposures; no derivative repricing.
+    Returns correlations, FHS/historical VaR and ES, scenario-frozen marginal/component ES,
+    historical and optional named hypothetical stresses (decimal asset_shocks and fx_shocks).
+    Horizon is the next common observed session, which may span holidays/weekends.
+    Saves immutable local snapshots and development, validation and monitoring reports.
+    Use returned audit.record_id with model_status and analysis_record. No trades are placed.
+    """
+    return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios)
+
+
+@server.tool(annotations=READ_ONLY)
+def model_status(record_id: str) -> dict:
+    """Verified model decision AS OF a saved portfolio run: champion, fallback reason, baselines,
+    validation window, recent QLIKE and coverage diagnostics. Refresh with portfolio_risk to
+    monitor new data; this lookup neither fetches prices nor schedules monitoring."""
+    return _run(audit.record, record_id, "monitoring")["decision"]
+
+
+@server.tool(annotations=READ_ONLY)
+def analysis_record(
+    record_id: str,
+    section: Literal["manifest", "output", "snapshot", "development", "validation", "monitoring"] = "output",
+) -> dict:
+    """Read a saved portfolio result, exact data snapshot, or separate model report. Verify the
+    manifest and all linked SHA-256 objects before returning. Local application-immutable
+    storage detects modification; it is not externally certified WORM storage."""
+    return _run(audit.record, record_id, section)
 
 
 @server.tool(annotations=READ_ONLY)

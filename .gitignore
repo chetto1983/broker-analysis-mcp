@@ -6,6 +6,7 @@ wheels/
 *.egg-info
 .venv
 .pytest_cache/
+.research/
 # agent_e2e.py writes one JSON per scenario here; only the forecasting evidence is kept.
 e2e/runs/*
 !e2e/runs/tsfm.json
@@ -14,3 +15,4 @@ e2e/runs/*
 !e2e/runs/tsfm_eth_sol_holdout.json
 !e2e/runs/kronos_crypto.json
 !e2e/runs/kronos_crypto_ctx40.json
+!e2e/runs/timestral_209m_gguf.json

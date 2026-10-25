@@ -6,7 +6,7 @@ description: Risk and return analysis of a stock, index or ETF with the risk_met
 # Risk analysis
 
 ## Rules
-- Every number comes from `risk_metrics`: do not compute anything yourself, not even an average.
+- Every number comes from `risk_metrics` for one security or `portfolio_risk` for holdings: do not compute anything yourself, not even an average.
 - Always state the data window (`window.start`–`window.end`), the currency and the source (Yahoo Finance, prototype).
 - Report the tool's `warnings`. If a value is `null`, say that it is not available and why.
 - This is internal analysis, not a personalised recommendation to a client.
@@ -18,6 +18,18 @@ description: Risk and return analysis of a stock, index or ETF with the risk_met
 - The Bloomberg-style beta needs a `period` of at least 2y: with fewer weeks the tool warns about it.
 - Crypto assets (BTC-USD, ETH-USD) trade every day, so the tool annualises over 365 days instead of 252 sessions (`parameters.periods_per_year`); say so. Against an equity index the relative metrics use only the days on which both trade.
 - `risk_free_annual`: risk-free rate as a decimal (€STR or the 12-month BOT for the euro, T-bills for the dollar). If the analyst does not give one, use 0 and say so.
+
+## Portfolio analysis and model reports
+- For positions, use `portfolio_risk`, never add individual VaRs or infer portfolio risk from `risk_metrics`.
+- Obtain signed market values in each ticker's quote currency and total positive NAV in the requested base currency. Do not invent holdings, quantities, FX conversions or NAV. London market values are in GBP, not pence. Check the returned valuation date against the supplied values.
+- Residual cash and financing have zero assumed return/cost. Historical returns reconstruct current fixed exposures, not actual historical performance. Nonlinear derivatives are unsupported.
+- Report FHS VaR and ES together, confidence, base currency, horizon, model status and warnings. The horizon is the next common observed session; do not call it one calendar day. Cross-market closing times remain asynchronous.
+- Component ES adds to portfolio ES; a negative component may be a hedge. Marginal ES holds scenarios and their volatility scale fixed, not a fully refitted portfolio sensitivity.
+- State whether stress scenarios are hypothetical or historical, use the tool's actual dates and mark unavailable windows. Missing hypothetical factors mean zero shock. Scenario losses have no assigned probability.
+- Use the returned `audit.record_id` with `model_status` for the saved champion, fallback reason, validation window and coverage diagnostics. It is an as-of decision, not a live monitor. Run `portfolio_risk` again with current holdings to refresh it.
+- Use `analysis_record` sections `development`, `validation`, `monitoring` for separate model reports. `snapshot` provides exact stored inputs and `output` the saved result. Do not claim an independent approval, regulatory compliance or ES calibration from the model's diagnostic results.
+- The implemented models are EWMA and a rolling 60-session variance challenger. Report insufficient validation history and fallback explicitly. Do not claim that HAR, GARCH, ARFIMA or foundation models are being used.
+- Local records are append-only and hash-verified through the application; they are not externally certified immutable storage. Portfolio runs persist holdings and inputs locally.
 
 ## How to read the results
 | Metric | Reading | Caution |

@@ -41,7 +41,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import torch
 import yfinance as yf
 
 UNIVERSE = ["ENI.MI", "ISP.MI", "UCG.MI", "AAPL", "MSFT", "NVDA", "^GSPC", "FTSEMIB.MI", "^STOXX50E", "SWDA.MI"]
@@ -69,6 +68,8 @@ class Timestral(Univariate):
 
     def quantiles(self, contexts: np.ndarray, horizon: int) -> np.ndarray:
         """(B, H, len(LEVELS)) quantile forecasts."""
+        import torch
+
         with torch.no_grad():
             f = self.model.forecast(contexts, prediction_length=horizon)
         idx = [list(f.quantile_levels).index(q) for q in LEVELS]
@@ -82,6 +83,8 @@ class Chronos(Univariate):
         self.pipeline = BaseChronosPipeline.from_pretrained(f"amazon/{repo}", device_map="cpu")
 
     def quantiles(self, contexts: np.ndarray, horizon: int) -> np.ndarray:
+        import torch
+
         x = torch.tensor(contexts, dtype=torch.float32)
         if type(self.pipeline).__name__ == "Chronos2Pipeline":
             x = x[:, None, :]  # Chronos-2 takes (series, variates, time)

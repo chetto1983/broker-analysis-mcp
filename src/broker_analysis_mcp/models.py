@@ -50,3 +50,18 @@ class HookAction(BaseModel):
 
     type: Literal["webhook", "file"]
     target: Annotated[str, Field(max_length=500, description="URL for webhook, file name for file")]
+
+
+class Position(BaseModel):
+    """Signed market value in the security's quote currency (GBP, not GBp)."""
+
+    ticker: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^=._-]+$")
+    market_value: float = Field(allow_inf_nan=False)
+
+
+class StressScenario(BaseModel):
+    """Hypothetical local-price and FX shocks, in decimals. Missing shocks mean zero."""
+
+    name: str = Field(min_length=1, max_length=80)
+    asset_shocks: dict[str, Annotated[float, Field(ge=-1, le=10, allow_inf_nan=False)]] = Field(default_factory=dict)
+    fx_shocks: dict[str, Annotated[float, Field(ge=-1, le=10, allow_inf_nan=False)]] = Field(default_factory=dict)

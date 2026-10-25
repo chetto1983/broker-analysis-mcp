@@ -28,6 +28,9 @@ its dependencies and Python 3.13 if it is missing.
 
 | Tool | What it returns |
 | --- | --- |
+| `portfolio_risk` | Fixed current positions in a base currency: FX-aware returns, correlations, historical and filtered-historical-simulation VaR/ES, component and scenario-frozen marginal ES, named historical/hypothetical stress scenarios. Saves a data snapshot and separate development, validation and monitoring reports. |
+| `model_status` | Champion and EWMA fallback decision as of a saved portfolio run, validation and monitoring QLIKE, VaR coverage diagnostics and last validation date. |
+| `analysis_record` | Hash-verified output, exact snapshot, manifest or one of the three model reports, by record ID. |
 | `risk_metrics` | CAGR, close-to-close and range volatility (Garman-Klass, Parkinson, Rogers-Satchell), Sharpe with standard error and t statistic, Probabilistic Sharpe Ratio, Sortino, Omega, max drawdown, CDaR, Calmar, historical and Cornish-Fisher VaR, expected shortfall; against a benchmark also beta and correlation, Bloomberg-style adjusted beta (two years weekly, 0.67 raw + 0.33), Jensen's alpha, Treynor, M², information ratio, tracking error and Morningstar-style up/down capture |
 | `technical_indicators` | Snapshot of SMAs, RSI, MACD, Bollinger, ATR, 52-week range, all with adjustable parameters |
 | `fundamental_ratios` / `peer_comparison` | Multiples, DuPont (ROE, ROA, margins, turnover, equity multiplier), ROIC, working-capital cycle, liquidity, leverage and coverage, payout, revenue CAGR; CAPM cost of equity, WACC, EVA and unlevered beta when the analyst gives the risk-free rate and the equity risk premium; Piotroski F-score, Altman Z and Z'', Beneish M-score with their components (not for banks and insurers); currency conversion between quote and statements |
@@ -38,6 +41,59 @@ its dependencies and Python 3.13 if it is missing.
 
 Every metric carries its unit and the key of the formula it came from (`references.py`, with
 arXiv sources where one exists), plus the data window, source and warnings.
+
+### Portfolio risk and model records
+
+Pass signed **market values**, not share counts, in each security's quote currency (GBP for
+London prices normalised from pence). `portfolio_value` is total positive NAV in `base_currency`,
+including cash. For example:
+
+```json
+{
+  "positions": [
+    {"ticker": "AAPL", "market_value": 10000},
+    {"ticker": "ENI.MI", "market_value": 8000}
+  ],
+  "portfolio_value": 25000,
+  "base_currency": "EUR",
+  "period": "5y",
+  "confidence": 0.975,
+  "scenarios": [{
+    "name": "Equity and dollar decline",
+    "asset_shocks": {"AAPL": -0.20, "ENI.MI": -0.15},
+    "fx_shocks": {"USD": -0.10}
+  }]
+}
+```
+
+Use position values as of the common valuation date returned by the tool. Residual cash earns
+zero; negative residual cash represents financing with zero assumed financing cost. This is a
+fixed-exposure risk reconstruction, not actual historical portfolio performance. No options or
+other nonlinear instruments are repriced. Prices and FX are intersected **before** returns; no
+missing values are filled. The horizon is the next common observed session, not necessarily one
+calendar day. Closes in different time zones remain asynchronous. Historical stress scenarios
+exclude current UTC-date/future bars along with the rest of the analysis. Historical episodes
+are unavailable when their full dates are not covered; request `10y` or `max` for older episodes.
+
+The implemented registry contains EWMA (lambda 0.94) and a rolling 60-session mean-square
+challenger. It does not yet implement HAR, ARFIMA or GARCH. At least 435 returns are needed for
+252 validation observations after a 60-observation warm-up and a separate 63-observation
+monitoring window. The challenger must improve QLIKE with a HAC z statistic above 1.96;
+subsequent monitoring deterioration or a VaR coverage alarm triggers EWMA. With less history,
+the fallback reason is explicit. This policy is evaluated on each `portfolio_risk` call;
+`model_status(record_id)` reads that saved decision and does not run a background scheduler.
+
+Every successful run stores its exact price/FX inputs, alignment calendar, request, versions,
+source hashes, forecasts, output and three separate reports under
+`$BROKER_ANALYSIS_HOME/records` (default `~/.broker-analysis/records`).
+`audit.record_id` identifies the manifest; use `analysis_record` with `section` set to `output`,
+`snapshot`, `development`, `validation` or `monitoring`. Objects use canonical JSON and SHA-256,
+are published atomically and are never overwritten by the application. Every lookup verifies
+all manifest-linked objects. Administrators can still delete or replace local files: this is
+tamper detection and application immutability, not certified WORM storage. Snapshots contain
+position values; secure this local directory accordingly. Older single-security tools do not
+create these portfolio records. See [model governance](docs/PORTFOLIO_MODELS.md) for the formulas,
+validation policy, interpretation and operating workflow.
 
 ## Parametric analysis
 
@@ -97,6 +153,26 @@ uv run ruff check .                             # lint, pinned to ruff 0.17.1
 
 `e2e/tsfm_eval.py` reruns the forecasting test; it needs an environment with torch, `timestral` and
 `chronos-forecasting`, which this project does not install.
+
+`e2e/timestral_gguf_eval.py` tests the specific
+[Timestral-209M F32 GGUF conversion](https://huggingface.co/EvoAwaken-Workshop/Timestral-209M-gguf)
+with its documented [Rust/Vulkan runtime](https://github.com/gouzil/rust-model-inference/tree/cc72a61fcd0c4314479291bd189555f5718ca85e).
+It needs a separately built Vulkan binary and the checksum-verified model, not PyTorch.
+Example after placing the runtime and model under the ignored `.research/` directory:
+
+```powershell
+.venv/Scripts/python.exe -m e2e.timestral_gguf_eval `
+  --binary .research/rust-model-inference/target/release-fast/rust-model-inference.exe `
+  --model .research/models/Timestral-209M-F32.gguf `
+  --out e2e/runs/timestral_209m_gguf.json
+```
+
+The default is an exploratory three-asset, eight-origin pilot (100-session span, step 10).
+Use `--span 750` to match the larger existing rolling window; `--smoke-only` checks numerical
+agreement between the Rust CPU and GPU paths. GPU dispatch evidence is required and saved
+alongside exact requests, outputs, logs and price snapshots. CPU/GPU agreement is not an
+independent comparison against the official PyTorch implementation. The GGUF model is a separate
+experiment and is not automatically admitted to the portfolio model registry.
 
 ## Measured, not assumed
 
