@@ -115,12 +115,17 @@ def report(
                          "market_value_quote": position.market_value, "fx_to_base": float(rates.iloc[-1]),
                          "market_value_base": value, "weight_nav": value / portfolio_value})
     exposure = np.array(exposures)
+    gross_exposure = float(np.abs(exposure).sum())
+    if not np.isfinite(gross_exposure) or gross_exposure <= 0:
+        raise data.DataError("converted gross exposure must be finite and positive")
     returns = pd.DataFrame(base_prices).pct_change(fill_method=None).iloc[1:]
     matrix = returns.to_numpy()
     portfolio_returns = matrix @ (exposure / portfolio_value)
+    # Cash must not change monetary risk through the variance floor or model selection.
+    model_returns = matrix @ (exposure / gross_exposure)
     if not np.isfinite(matrix).all() or not np.isfinite(portfolio_returns).all():
         raise data.DataError("portfolio return calculation overflowed")
-    predicted, status, reports = forecasting.evaluate(portfolio_returns, dates[1:], confidence)
+    predicted, status, reports = forecasting.evaluate(model_returns, dates[1:], confidence)
     model = status["champion"]
     n = len(matrix)
     first = max(forecasting.BURN, n - 500)
@@ -170,13 +175,13 @@ def report(
         warnings.append("Fewer than 20 effective tail observations; ES and its attribution are statistically fragile.")
     if status["fallback"]:
         warnings.append(f"EWMA fallback: {status['reason']}; inspect model_status and monitoring report.")
-    if np.var(portfolio_returns) < forecasting.FLOOR:
+    if np.var(model_returns) < forecasting.FLOOR:
         warnings.append("Portfolio history is effectively constant; forecast variance uses a numerical floor.")
     correlation = returns.corr()
     output = {
         "currency": base_currency, "portfolio_value": portfolio_value,
         "residual_cash_base": portfolio_value - float(exposure.sum()),
-        "gross_exposure_base": float(np.abs(exposure).sum()), "positions": holdings,
+        "gross_exposure_base": gross_exposure, "positions": holdings,
         "window": {"start": dates[0], "end": dates[-1], "returns": n},
         "parameters": {"confidence": confidence, "period": period, "horizon": "next common observed session",
                        "fhs_lookback": n - first, "valuation_date": dates[-1]},
@@ -184,7 +189,7 @@ def report(
                     "expected_shortfall_fhs": _metric(fhs["expected_shortfall"], base_currency, "fhs_es"),
                     "var_historical": _metric(historical["var"], base_currency, "historical"),
                     "expected_shortfall_historical": _metric(historical["expected_shortfall"], base_currency, "historical"),
-                    "forecast_volatility_session": _metric(np.sqrt(predicted[model][-1]) * 100, "% NAV", "variance")},
+                    "forecast_volatility_session": _metric(np.sqrt(predicted[model][-1]) * (gross_exposure / portfolio_value) * 100, "% NAV", "variance")},
         "correlation": {a: {b: float(correlation.loc[a, b]) if pd.notna(correlation.loc[a, b]) else None
                             for b in tickers} for a in tickers},
         "stress_scenarios": stress, "model_status": status, "warnings": warnings,
@@ -209,6 +214,9 @@ def report(
         "calendar_policy": "Intersection of observed asset and FX dates before returns; exclude current UTC-date/future bars; no fills; no annualisation.",
         "price_policy": "Split/dividend-adjusted historical closes; current market values supplied by analyst.",
         "portfolio_returns": portfolio_returns.tolist(),
+        "model_returns": model_returns.tolist(),
+        "forecast_return_basis": "gross_exposure",
+        "forecast_return_denominator_base": gross_exposure,
         "forecast_variances": {k: v[forecasting.BURN:].tolist() for k, v in predicted.items()},
         "forecast_start_return_index": forecasting.BURN,
     }

@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 SeriesId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,31}$", description="lowercase id, e.g. ema_fast")]
 Color = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]
@@ -55,12 +55,16 @@ class HookAction(BaseModel):
 class Position(BaseModel):
     """Signed market value in the security's quote currency (GBP, not GBp)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     ticker: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^=._-]+$")
     market_value: float = Field(allow_inf_nan=False)
 
 
 class StressScenario(BaseModel):
     """Hypothetical local-price and FX shocks, in decimals. Missing shocks mean zero."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=80)
     asset_shocks: dict[str, Annotated[float, Field(ge=-1, le=10, allow_inf_nan=False)]] = Field(default_factory=dict)

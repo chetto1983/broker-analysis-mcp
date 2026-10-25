@@ -1,6 +1,6 @@
 # Portfolio model development, validation and monitoring
 
-Implementation version: `portfolio-risk-1`. This is an analyst risk prototype for linear cash
+Implementation version: `portfolio-risk-2`. This is an analyst risk prototype for linear cash
 securities. No independent model approval or regulatory certification is implied.
 
 ## Development report
@@ -21,7 +21,10 @@ The registry has two zero-mean variance models, with a `1e-12` numerical floor:
 - EWMA: `v[t+1] = .94*v[t] + .06*r[t]^2`; seed `v[60]` with the first 60 squared returns' mean.
 - Challenger: `v[t] = mean(r[t-60:t]^2)`.
 
-`r` is the fixed-exposure portfolio return relative to NAV. A forecast at index `t` never uses
+`r` is fixed-exposure portfolio P&L divided by gross base-currency exposure. This basis keeps
+the numerical floor and model decisions independent of idle cash and NAV. Reported volatility
+is converted to percent NAV; the snapshot retains both NAV returns and model returns and
+labels the forecast denominator. A forecast at index `t` never uses
 return `r[t]`. No annualisation or square-root-of-time extrapolation is applied. HAR, GARCH,
 ARFIMA and foundation models are not in this registry; adding one requires a new development
 record, selection policy and comparative validation.

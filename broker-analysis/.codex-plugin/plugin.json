@@ -1,7 +1,7 @@
 {
   "name": "broker-analysis",
-  "version": "0.1.1",
-  "description": "Read-only financial analysis on Yahoo Finance data: risk, fundamentals, technicals, ETFs and parametric analyses with alert hooks, plus the skills that teach the agent to read every number.",
+  "version": "0.2.0",
+  "description": "Financial analysis on Yahoo Finance data: security and portfolio risk, fundamentals, technicals, ETFs, model validation reports, local audit records and alert hooks. No trading operations.",
   "author": {
     "name": "Davide Marchetto"
   },
@@ -13,12 +13,13 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Broker Analysis",
-    "shortDescription": "Risk, fundamentals, technicals and ETF analysis on Yahoo Finance data",
-    "longDescription": "A read-only MCP server for a broker's analysts: risk and return metrics, fundamental ratios and balance-sheet scores, technical indicators, ETF tracking, parametric analyses with charts and alert hooks. Every number carries its unit, formula and data window. Prototype: Yahoo Finance data through yfinance, not for production use.",
+    "shortDescription": "Portfolio and security risk, model reports, fundamentals and ETF analysis",
+    "longDescription": "Financial analysis for broker analysts: portfolio and security risk, fundamentals, technical indicators, ETF tracking, charts and alerts. Portfolio runs save exact local snapshots and separate development, validation and monitoring reports. No trades are placed. Prototype: unofficial Yahoo Finance data through yfinance.",
     "developerName": "Davide Marchetto",
     "category": "Finance",
     "capabilities": ["Read"],
     "defaultPrompt": [
+      "Analyse the risk of my holdings in EUR, including component expected shortfall and model validation.",
       "How risky is ENI.MI against the FTSE MIB over the last three years?",
       "Compare the TER and tracking difference of the main S&P 500 ETFs."
     ],

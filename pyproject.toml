@@ -1,6 +1,6 @@
 [project]
 name = "broker-analysis-mcp"
-version = "0.1.1"
+version = "0.2.0"
 description = "Read-only MCP server for financial analysis on Yahoo Finance data (prototype)"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -30,6 +30,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = ["live: needs network access to Yahoo Finance"]
 addopts = "-m 'not live'"
 

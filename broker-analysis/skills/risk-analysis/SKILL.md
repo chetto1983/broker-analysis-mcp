@@ -1,6 +1,6 @@
 ---
 name: risk-analysis
-description: Risk and return analysis of a stock, index or ETF with the risk_metrics tool of the broker-analysis server. Use it when the analyst asks about volatility, drawdown, Sharpe, Sortino, VaR, expected shortfall, beta (including the Bloomberg-style adjusted beta), correlation, Jensen's alpha, Treynor, M², information ratio, upside/downside capture, "how risky is it", "how much can it lose", or a risk comparison between instruments or against a benchmark.
+description: Risk analysis of securities and portfolios with risk_metrics and portfolio_risk. Use for holdings, portfolio NAV, long/short exposures, FX risk, stress scenarios, component or marginal expected shortfall, VaR, volatility, drawdown, Sharpe, beta and benchmark comparisons. Also use for model_status, champion/fallback decisions, calibration, validation/monitoring reports and analysis_record audit snapshots.
 ---
 
 # Risk analysis

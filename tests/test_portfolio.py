@@ -169,6 +169,13 @@ def test_nonfinite_and_invalid_shocks_are_rejected():
         StressScenario(name="bad", asset_shocks={"A": -2})
 
 
+def test_misspelled_stress_and_unsupported_position_fields_are_rejected():
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        StressScenario.model_validate({"name": "Crash", "asset_shock": {"A": -.2}})
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        Position.model_validate({"ticker": "A", "market_value": 1000, "currency": "EUR"})
+
+
 def test_audit_concurrency_deduplication_and_tampering(monkeypatch, tmp_path):
     monkeypatch.setenv("BROKER_ANALYSIS_HOME", str(tmp_path))
     with ThreadPoolExecutor(max_workers=4) as pool:

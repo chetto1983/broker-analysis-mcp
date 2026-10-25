@@ -137,8 +137,9 @@ They are written in English and tell the agent to answer in the analyst's langua
 ## Release
 
 `.mcp.json` launches the server from the tag `v<version>`. A release bumps the version in
-`pyproject.toml`, in both `plugin.json` files and in the tag `.mcp.json` names, then tags the commit.
-`tests/test_plugin_manifest.py` fails while the four disagree.
+`pyproject.toml`, the package metadata in `uv.lock`, all three plugin manifests (root, Claude,
+Codex), and the tag named by both `.mcp.json` and `mcp.json`, then tags the tested commit.
+`tests/test_plugin_manifest.py` checks the plugin and launcher versions against the package.
 
 ## Run
 

@@ -7,7 +7,7 @@ assumed to transfer to this implementation. All forecasts at t use returns stric
 import numpy as np
 from scipy.stats import binomtest
 
-VERSION = "portfolio-risk-1"
+VERSION = "portfolio-risk-2"
 BURN = 60
 VALIDATION = 252
 MONITORING = 63
@@ -99,6 +99,7 @@ def evaluate(returns: np.ndarray, dates: list[str], confidence: float) -> tuple[
             "models": {"ewma_094": "v[t+1] = .94*v[t] + .06*r[t]^2; first 60 returns seed v[60]",
                        "rolling_60": "v[t] = mean(r[t-60:t]^2)"},
             "variance_floor": FLOOR, "conditional_mean": 0,
+            "return_basis": "Fixed-exposure P&L divided by gross base-currency exposure; output volatility converted to percent NAV.",
             "selection_policy": "252 validation observations: positive QLIKE improvement and HAC z > 1.96 (lag 5).",
             "monitoring_policy": "Next 63 observations: nonpositive QLIKE improvement or coverage p < .01 triggers EWMA.",
             "limitations": ["Squared returns are a noisy variance proxy.", "No independent human approval recorded.",

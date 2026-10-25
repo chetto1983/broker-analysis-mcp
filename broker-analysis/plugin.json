@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "broker-analysis",
-  "version": "0.1.1",
-  "description": "Read-only financial analysis on Yahoo Finance data: risk, fundamentals, technicals, ETFs and parametric analyses with alert hooks, plus the skills that teach the agent to read every number.",
+  "version": "0.2.0",
+  "description": "Financial analysis on Yahoo Finance data: security and portfolio risk, fundamentals, technicals, ETFs, model validation reports, local audit records and alert hooks. No trading operations.",
   "author": {
     "name": "Davide Marchetto"
   },
