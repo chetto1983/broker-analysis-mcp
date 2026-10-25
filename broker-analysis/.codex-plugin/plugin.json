@@ -1,6 +1,6 @@
 {
   "name": "broker-analysis",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Financial analysis on Yahoo Finance data: security and portfolio risk, fundamentals, technicals, ETFs, model validation reports, local audit records and alert hooks. No trading operations.",
   "author": {
     "name": "Davide Marchetto"

@@ -1,0 +1,17 @@
+{
+  "positions": [
+    {"ticker": "AAPL", "market_value": 10000},
+    {"ticker": "ENI.MI", "market_value": -3000}
+  ],
+  "portfolio_value": 15000,
+  "base_currency": "EUR",
+  "period": "5y",
+  "confidence": 0.975,
+  "scenarios": [
+    {
+      "name": "Illustrative only: AAPL in USD, ENI.MI in EUR; not real holdings",
+      "asset_shocks": {"AAPL": -0.2, "ENI.MI": -0.15},
+      "fx_shocks": {"USD": -0.1}
+    }
+  ]
+}

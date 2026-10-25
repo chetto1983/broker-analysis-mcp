@@ -1,6 +1,6 @@
 # Portfolio model development, validation and monitoring
 
-Implementation version: `portfolio-risk-2`. This is an analyst risk prototype for linear cash
+Implementation version: `portfolio-risk-3`. This is an analyst risk prototype for linear cash
 securities. No independent model approval or regulatory certification is implied.
 
 ## Development report
@@ -83,13 +83,28 @@ Coverage p-values below .01 also trigger EWMA; with short input history, coverag
 than 63 observations or be unavailable. Coverage count and tested model are always explicit.
 
 The two-sided exact binomial test assumes independent exceptions and has limited power over
-short windows. This release does not test exception independence or expected-shortfall
-calibration. EWMA fallback is a simpler estimate, not evidence that risk is well calibrated.
-Inspect the diagnostic and data warnings even when fallback succeeds.
+short windows. A supplementary Christoffersen first-order independence likelihood ratio now
+reports transition counts and an asymptotic chi-square p-value. Missing outcome/prior states
+produce no inference; zero cells or expected counts below five flag sparse data. The latter is
+a reporting heuristic, not a guarantee that a larger sample is adequate. Non-rejection does
+not establish independence. See the [method reference](https://www.mathworks.com/help/risk/varbacktest.cci.html).
+
+ES severity diagnostics report losses on VaR exceptions and the average loss-positive residual
+`VaR + max(realized_loss - VaR, 0)/(1-confidence) - ES`. They are descriptive only: no calibrated
+null distribution or p-value is supplied, and zero exceptions do not establish ES calibration.
+See [ES backtesting assumptions](https://www.mathworks.com/help/risk/overview-of-expected-shortfall-backtesting.html).
+These additions do not alter champion selection or the existing coverage alarm. EWMA fallback
+is a simpler estimate, not evidence that risk is well calibrated.
+
+The monitoring report retains each forecast origin, realized date, historical window, VaR,
+ES and observed loss in fractions of gross base-currency exposure. Each forecast uses only
+returns before its realized date and the model selected before monitoring. These rows make
+the diagnostic calculations independently reconstructible from the saved snapshot.
 
 Monitoring runs when `portfolio_risk` is called again. `model_status(record_id)` returns a
 verified historical decision and its as-of/last-validation dates. It does not update old reports
-or install a scheduler. An operator can invoke the tool periodically with current holdings;
+or install a scheduler. The [monitor CLI](PORTFOLIO_MONITORING.md) can be invoked by an external
+scheduler with a current holdings/NAV configuration. An operator can also invoke the tool periodically;
 each run gets a new manifest. Human review should follow persistent coverage alarms, stale
 inputs, unexpected exposure changes or poor baseline performance. Record independent review
 and approval outside this prototype before operational model adoption.

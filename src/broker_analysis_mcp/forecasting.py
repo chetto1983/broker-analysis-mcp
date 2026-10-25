@@ -7,7 +7,9 @@ assumed to transfer to this implementation. All forecasts at t use returns stric
 import numpy as np
 from scipy.stats import binomtest
 
-VERSION = "portfolio-risk-2"
+from broker_analysis_mcp import calibration as diagnostics
+
+VERSION = "portfolio-risk-3"
 BURN = 60
 VALIDATION = 252
 MONITORING = 63
@@ -72,21 +74,33 @@ def evaluate(returns: np.ndarray, dates: list[str], confidence: float) -> tuple[
     status = select(validation, monitoring)
     # Backtest the champion selected BEFORE monitoring, with origin-specific residual histories.
     chosen = status["validation_champion"]
-    breaches = 0
-    count = 0
+    observations = []
     for t in range(max(BURN + 100, split), n):
         past = returns[max(BURN, t - 500):t]
         scales = predicted[chosen][max(BURN, t - 500):t]
         losses = -past / np.sqrt(scales) * np.sqrt(predicted[chosen][t])
-        threshold = np.quantile(losses, confidence, method="inverted_cdf")
-        breaches += int(-returns[t] > threshold)
-        count += 1
+        threshold, expected_shortfall = diagnostics.empirical_var_es(losses, confidence)
+        observations.append({
+            "forecast_origin": dates[t - 1], "realized_date": dates[t], "return_index": t,
+            "history_start": dates[max(BURN, t - 500)], "history_end": dates[t - 1],
+            "history_observations": len(past), "realized_loss": float(-returns[t]),
+            "var": threshold, "expected_shortfall": expected_shortfall,
+            "var_exception": bool(-returns[t] > threshold),
+        })
+    count = len(observations)
+    hits = [o["var_exception"] for o in observations]
+    breaches = sum(hits)
     calibration = {
         "model": chosen, "observations": count, "var_exceptions": breaches,
+        "loss_unit": "fraction of gross base-currency exposure",
         "observed_coverage": 1 - breaches / count if count else None,
         "target_coverage": confidence,
         "binomial_p_value": float(binomtest(breaches, count, 1 - confidence).pvalue) if count else None,
-        "note": "Diagnostic only: binomial test assumes independent exceptions; ES calibration is not tested.",
+        "independence": diagnostics.independence(hits),
+        "es_severity": diagnostics.es_severity(
+            np.array([o["realized_loss"] for o in observations]), np.array([o["var"] for o in observations]),
+            np.array([o["expected_shortfall"] for o in observations]), confidence),
+        "note": "Existing coverage alarm uses an independence-assuming binomial test. Independence and ES severity diagnostics do not change model selection; ES calibration is not established.",
     }
     if count and calibration["binomial_p_value"] < 0.01:
         status.update(champion="ewma_094", fallback=True, reason="coverage_alarm")
@@ -105,10 +119,15 @@ def evaluate(returns: np.ndarray, dates: list[str], confidence: float) -> tuple[
             "limitations": ["Squared returns are a noisy variance proxy.", "No independent human approval recorded.",
                             "Repeated rolling selection is not a fresh independent experiment.",
                             "Fallback is a simpler estimate, not a guarantee of adequate calibration."],
-            "references": ["https://filteredhistoricalsimulation.com/", "https://faculty.runi.ac.il/kobi/riskmgt/rmtd.pdf"],
+            "references": ["https://filteredhistoricalsimulation.com/", "https://faculty.runi.ac.il/kobi/riskmgt/rmtd.pdf",
+                           "https://www.mathworks.com/help/risk/varbacktest.cci.html",
+                           "https://www.mathworks.com/help/risk/overview-of-expected-shortfall-backtesting.html",
+                           "https://users.ssc.wisc.edu/~behansen/718/Christoffersen1998.pdf"],
         },
         "validation": {"model_version": VERSION, "result": validation, "selected_model": status["validation_champion"],
                        "state": "evaluated" if validation else "insufficient_history"},
-        "monitoring": {"model_version": VERSION, "result": monitoring, "calibration": calibration, "decision": status},
+        "monitoring": {"model_version": VERSION, "result": monitoring, "calibration": calibration, "decision": status,
+                       "forecast_model": chosen, "loss_unit": "fraction of gross base-currency exposure",
+                       "forecast_observations": observations},
     }
     return predicted, status, reports

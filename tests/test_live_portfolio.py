@@ -228,6 +228,35 @@ def test_live_hypothetical_stress_respects_short_and_fx(live_portfolio):
     assert eni["market_value_base"] == -3000
 
 
+def test_live_monitoring_forecasts_match_saved_causal_inputs(live_portfolio):
+    snapshot = live_portfolio["sections"]["snapshot"]
+    monitoring = live_portfolio["sections"]["monitoring"]
+    rows = monitoring["forecast_observations"]
+    model = monitoring["forecast_model"]
+    returns = np.array(snapshot["model_returns"])
+    variances = np.array(snapshot["forecast_variances"][model])
+    offset = snapshot["forecast_start_return_index"]
+    dates = snapshot["common_dates"][1:]
+    confidence = snapshot["request"]["confidence"]
+    assert len(rows) == 63
+    assert monitoring["loss_unit"] == "fraction of gross base-currency exposure"
+    for row in rows:
+        t = row["return_index"]
+        start = max(offset, t - 500)
+        losses = -returns[start:t] * np.sqrt(variances[t - offset] / variances[start - offset:t - offset])
+        var, es = _tail(losses, confidence)
+        assert row["var"] == pytest.approx(var)
+        assert row["expected_shortfall"] == pytest.approx(es)
+        assert row["realized_loss"] == -returns[t]
+        assert row["forecast_origin"] == dates[t - 1] < row["realized_date"] == dates[t]
+        assert row["history_end"] == row["forecast_origin"]
+    calibration = monitoring["calibration"]
+    assert calibration["var_exceptions"] == sum(row["realized_loss"] > row["var"] for row in rows)
+    assert sum(calibration["independence"]["counts"].values()) == len(rows) - 1
+    assert calibration["es_severity"]["calibration_conclusion"] == "not_tested"
+    assert calibration["es_severity"]["p_value"] is None
+
+
 def test_live_records_verify_and_survive_server_restart(live_portfolio):
     report = live_portfolio["report"]
     sections = live_portfolio["sections"]

@@ -146,34 +146,24 @@ Codex), and the tag named by both `.mcp.json` and `mcp.json`, then tags the test
 ```
 uv sync
 uv run broker-analysis-mcp                      # stdio MCP server
+uv run broker-analysis-monitor --config examples/portfolio-monitor.json  # illustrative portfolio
 uv run pytest                                   # offline tests
 uv run pytest -m live -o addopts=""             # MCP end to end on live Yahoo data
 uv run python e2e/agent_e2e.py                  # a real agent answers analyst questions, scored (needs the claude CLI)
 uv run ruff check .                             # lint, pinned to ruff 0.17.1
 ```
 
-`e2e/tsfm_eval.py` reruns the forecasting test; it needs an environment with torch, `timestral` and
+`e2e/tsfm_eval.py` retains optional Chronos research adapters; it needs torch and
 `chronos-forecasting`, which this project does not install.
 
-`e2e/timestral_gguf_eval.py` tests the specific
-[Timestral-209M F32 GGUF conversion](https://huggingface.co/EvoAwaken-Workshop/Timestral-209M-gguf)
-with its documented [Rust/Vulkan runtime](https://github.com/gouzil/rust-model-inference/tree/cc72a61fcd0c4314479291bd189555f5718ca85e).
-It needs a separately built Vulkan binary and the checksum-verified model, not PyTorch.
-Example after placing the runtime and model under the ignored `.research/` directory:
+Timestral CPU/GPU adapters and the local GPU model/runtime were removed after the benchmark
+failed to establish an advantage. The [historical evaluation](docs/TIMESTRAL_209M_GPU.md)
+and measured results remain as evidence for that decision. Portfolio models use EWMA and
+the rolling 60-session baseline, with no foundation-model runtime dependency.
 
-```powershell
-.venv/Scripts/python.exe -m e2e.timestral_gguf_eval `
-  --binary .research/rust-model-inference/target/release-fast/rust-model-inference.exe `
-  --model .research/models/Timestral-209M-F32.gguf `
-  --out e2e/runs/timestral_209m_gguf.json
-```
-
-The default is an exploratory three-asset, eight-origin pilot (100-session span, step 10).
-Use `--span 750` to match the larger existing rolling window; `--smoke-only` checks numerical
-agreement between the Rust CPU and GPU paths. GPU dispatch evidence is required and saved
-alongside exact requests, outputs, logs and price snapshots. CPU/GPU agreement is not an
-independent comparison against the official PyTorch implementation. The GGUF model is a separate
-experiment and is not automatically admitted to the portfolio model registry.
+The [portfolio monitoring command](docs/PORTFOLIO_MONITORING.md) supports cron and Windows
+Task Scheduler with strict configuration validation, saved records and explicit exit codes.
+Supply current holdings and NAV; the example is illustrative and no schedule is installed.
 
 ## Measured, not assumed
 

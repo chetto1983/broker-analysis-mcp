@@ -29,6 +29,8 @@ description: Risk analysis of securities and portfolios with risk_metrics and po
 - Use the returned `audit.record_id` with `model_status` for the saved champion, fallback reason, validation window and coverage diagnostics. It is an as-of decision, not a live monitor. Run `portfolio_risk` again with current holdings to refresh it.
 - Use `analysis_record` sections `development`, `validation`, `monitoring` for separate model reports. `snapshot` provides exact stored inputs and `output` the saved result. Do not claim an independent approval, regulatory compliance or ES calibration from the model's diagnostic results.
 - The implemented models are EWMA and a rolling 60-session variance challenger. Report insufficient validation history and fallback explicitly. Do not claim that HAR, GARCH, ARFIMA or foundation models are being used.
+- Independence and ES severity diagnostics are supplementary: sparse transitions and few tail losses cannot establish calibration. Report their states and limitations; never turn an unavailable p-value into a pass. The monitoring report retains the forecasts and realized losses used by the diagnostics.
+- For periodic runs, `broker-analysis-monitor --config portfolio.json` is available to an external scheduler. Obtain current holdings/NAV first; the example is illustrative. Exit 0 means the run completed, not model approval; 2 means failure, 3 a saved coverage alarm. No scheduler or notifications are installed automatically.
 - Local records are append-only and hash-verified through the application; they are not externally certified immutable storage. Portfolio runs persist holdings and inputs locally.
 
 ## How to read the results

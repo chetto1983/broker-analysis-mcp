@@ -1,6 +1,6 @@
 [project]
 name = "broker-analysis-mcp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Read-only MCP server for financial analysis on Yahoo Finance data (prototype)"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -16,6 +16,7 @@ dependencies = [
 [project.scripts]
 broker-analysis-mcp = "broker_analysis_mcp.server:main"
 broker-analysis-hooks = "broker_analysis_mcp.hooks:main"
+broker-analysis-monitor = "broker_analysis_mcp.monitoring:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.14.0"]

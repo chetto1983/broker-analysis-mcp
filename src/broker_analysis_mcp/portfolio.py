@@ -203,7 +203,7 @@ def report(
         "schema_version": 1, "created_at": datetime.now(UTC).isoformat(),
         "implementation_version": forecasting.VERSION,
         "source_hashes": {name: sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-                          for name in ("portfolio.py", "forecasting.py", "audit.py", "data.py", "models.py")},
+                          for name in ("portfolio.py", "forecasting.py", "calibration.py", "audit.py", "data.py", "models.py")},
         "runtime_versions": {name: version(name) for name in ("broker-analysis-mcp", "numpy", "pandas", "scipy", "yfinance")},
         "request": {"positions": [p.model_dump() for p in positions], "portfolio_value": portfolio_value,
                     "base_currency": base_currency, "period": period, "confidence": confidence,

@@ -1,9 +1,10 @@
 # Timestral-209M GGUF GPU pilot — 25 October 2026
 
 The requested model ran successfully on the NVIDIA RTX A2000 Laptop GPU (4 GiB, driver 596.52)
-through the conversion author's strict Vulkan runtime. It remains an experimental benchmark,
-outside the portfolio model registry. This pilot does not establish an improvement over the
-existing risk baselines.
+through the conversion author's strict Vulkan runtime. This pilot did not establish an
+improvement over the existing risk baselines. Timestral was subsequently removed at the user's
+request: both CPU/GPU adapters and the local model/runtime downloads. This document is a
+historical evaluation, not a supported installation guide.
 
 ## Reproduction and execution evidence
 
@@ -22,11 +23,13 @@ existing risk baselines.
 - The runtime also uses CPU work for preprocessing and output projections. GPU execution here
   means the Transformer uses Vulkan, not that every operation runs on GPU.
 
-The exact command is in [README.md](../README.md). Results, per-origin losses, model hashes,
+The former adapter and reproduction command are preserved at Git tag `v0.2.0`.
+Results, per-origin losses, model hashes,
 device names and per-call timings are in
 [timestral_209m_gguf.json](../e2e/runs/timestral_209m_gguf.json). Requests, full forecasts, stderr
-logs and price CSV snapshots are retained locally in `.research/gguf-evaluation/`; the report
-records their relevant hashes. Runtime, compiler and model downloads are excluded from Git.
+logs and price CSV snapshots from `.research/gguf-evaluation/` were removed during cleanup;
+the report retains their relevant hashes. Runtime, compiler and model downloads were excluded
+from Git and have also been removed locally.
 
 ## Numerical checks and runtime
 
@@ -76,7 +79,5 @@ against drift was -2.84, but against random walk it was -0.05. With eight origin
 targets and many comparisons, isolated statistics do not establish a reliable advantage.
 Training-data overlap is not established, and these are not post-release-only evaluation data.
 
-Decision: retain the reproducible experiment and its evidence; do not promote this model into
-the portfolio risk registry. A broader, predeclared evaluation and adequate calibration would
-be needed before considering promotion. This finding is limited to the pinned model, runtime,
-hardware, horizons and small sample tested here.
+Decision: remove Timestral execution support and retain the measured evidence. This finding
+is limited to the pinned model, runtime, hardware, horizons and small sample tested here.

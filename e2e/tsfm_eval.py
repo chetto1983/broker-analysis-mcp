@@ -1,6 +1,6 @@
 """Out-of-sample test of time-series foundation models against naive baselines on market data.
 
-Models: Mistral Timestral (5M, 28M, 123M) and Amazon Chronos-Bolt-base and Chronos-2.
+Optional research models: Amazon Chronos-Bolt-base and Chronos-2.
 
 Protocol, fixed before looking at any result:
   universe     10 daily series, 10 years of Yahoo adjusted OHLC
@@ -23,8 +23,8 @@ Protocol, fixed before looking at any result:
                loss QLIKE (Patton 2011) and MSE of log variance
 
 A component that learns must beat its dumb baseline out of sample, or it is dropped.
-Run with an environment holding `timestral` and torch:
-  python e2e/tsfm_eval.py --models timestral-28M chronos-bolt-base chronos-2 --out e2e/runs/tsfm.json
+Run with an environment holding `chronos-forecasting` and torch:
+  python e2e/tsfm_eval.py --models chronos-bolt-base chronos-2 --out e2e/runs/tsfm.json
   python e2e/tsfm_eval.py --tickers BTC-USD ETH-USD SOL-USD XRP-USD --out e2e/runs/tsfm_crypto.json
 --first-origin DATE drops earlier origins, for a model whose training data end inside the window.
 Kronos (arXiv:2508.02739) was evaluated with an adapter and a KV cache removed once it was dropped;
@@ -60,22 +60,6 @@ class Univariate:
         return qp, qv.mean(axis=2).mean(axis=1)
 
 
-class Timestral(Univariate):
-    def __init__(self, size: str):
-        from timestral import TimestralForecaster
-
-        self.model = TimestralForecaster.from_pretrained(f"mistralai/Timestral-{size}", device="cpu")
-
-    def quantiles(self, contexts: np.ndarray, horizon: int) -> np.ndarray:
-        """(B, H, len(LEVELS)) quantile forecasts."""
-        import torch
-
-        with torch.no_grad():
-            f = self.model.forecast(contexts, prediction_length=horizon)
-        idx = [list(f.quantile_levels).index(q) for q in LEVELS]
-        return f.quantiles[:, 0][..., idx].cpu().numpy()
-
-
 class Chronos(Univariate):
     def __init__(self, repo: str):
         from chronos import BaseChronosPipeline
@@ -96,8 +80,8 @@ class Chronos(Univariate):
 
 
 def make(name: str):
-    if name.startswith("timestral-"):
-        return Timestral(name.removeprefix("timestral-"))
+    if name not in {"chronos-bolt-base", "chronos-2"}:
+        raise ValueError(f"unsupported research model: {name}")
     return Chronos(name)
 
 
@@ -251,7 +235,7 @@ def all_tests(per_ticker: dict) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--models", nargs="+", default=["timestral-28M", "chronos-bolt-base", "chronos-2"])
+    parser.add_argument("--models", nargs="+", choices=["chronos-bolt-base", "chronos-2"], default=["chronos-bolt-base", "chronos-2"])
     parser.add_argument("--tickers", nargs="+", default=UNIVERSE)
     parser.add_argument("--skip-last", type=int, default=0)
     parser.add_argument("--first-origin", help="drop origins before this date (a model's training cutoff)")
