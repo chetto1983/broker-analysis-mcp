@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "broker-analysis": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/chetto1983/broker-analysis-mcp@v0.1.1",
+        "broker-analysis-mcp"
+      ]
+    }
+  }
+}

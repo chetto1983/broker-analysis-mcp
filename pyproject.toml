@@ -1,6 +1,6 @@
 [project]
 name = "broker-analysis-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read-only MCP server for financial analysis on Yahoo Finance data (prototype)"
 readme = "README.md"
 requires-python = ">=3.13"
