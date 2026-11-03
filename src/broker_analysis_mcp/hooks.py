@@ -32,6 +32,10 @@ Loader = Callable[[str, str], tuple[pd.DataFrame, data.Meta]]
 FILE_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
+def _live_history(ticker: str, period: str) -> tuple[pd.DataFrame, data.Meta]:
+    return data.history(ticker, period, include_incomplete_session=True)
+
+
 def home() -> Path:
     path = Path(os.environ.get("BROKER_ANALYSIS_HOME", Path.home() / ".broker-analysis"))
     path.mkdir(parents=True, exist_ok=True)
@@ -104,7 +108,7 @@ def create(
     indicators: list[IndicatorSpec],
     series: list[SeriesSpec],
     period: str = "2y",
-    loader: Loader = data.history,
+    loader: Loader = _live_history,
 ) -> dict:
     check_action(action)
     hook = {
@@ -181,7 +185,7 @@ def _save_bookmarks(bookmarks: dict[str, str]) -> None:
     _save(latest)
 
 
-def run(loader: Loader = data.history) -> dict:
+def run(loader: Loader = _live_history) -> dict:
     """Evaluates every hook; one failing hook or delivery is reported and does not stop the others."""
     (home() / "alerts").mkdir(exist_ok=True)
     fired, failed, checked, bookmarks = [], [], [], {}

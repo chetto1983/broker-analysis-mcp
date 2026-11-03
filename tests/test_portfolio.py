@@ -28,7 +28,7 @@ def market(monkeypatch, tmp_path):
     }
     fx = pd.Series(.9 * np.cumprod(1 + rng.normal(0, .003, len(dates))), index=dates)
 
-    def history(ticker, period):
+    def history(ticker, period, include_incomplete_session=False):
         return pd.DataFrame({"Close": prices[ticker]}), data.Meta(ticker, "USD" if ticker == "A" else "EUR")
 
     monkeypatch.setattr(data, "history", history)

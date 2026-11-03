@@ -57,6 +57,7 @@ def _metric(value: float, unit: str, ref: str) -> dict:
 def report(
     positions: list[Position], portfolio_value: float, base_currency: str = "EUR", period: str = "5y",
     confidence: float = 0.975, scenarios: list[StressScenario] | None = None,
+    include_incomplete_session: bool | None = None,
 ) -> dict:
     if not 1 <= len(positions) <= 30:
         raise data.DataError("pass 1 to 30 nonzero positions")
@@ -76,25 +77,23 @@ def report(
     if len(scenarios) > 20 or len({s.name for s in scenarios}) != len(scenarios):
         raise data.DataError("use at most 20 uniquely named scenarios")
     local, metadata, fx = {}, {}, {}
+    source_frames, source_metas = {}, {}
     warnings = ["Current fixed exposures, zero cash return, no transaction costs or nonlinear derivative repricing.",
                 "FHS uses one common portfolio volatility scale; it does not forecast changing cross-asset correlations.",
                 "Marginal ES freezes scenarios and volatility scales; negative contributions represent hedges."]
     for position in positions:
-        prices, meta = data.history(position.ticker, period)
+        prices, meta = data.history(position.ticker, period, bool(include_incomplete_session))
+        source_frames[position.ticker], source_metas[position.ticker] = prices, meta
         if len(meta.currency) != 3 or not meta.currency.isupper():
             raise data.DataError(f"unknown quote currency for {position.ticker}")
         local[position.ticker] = _series(prices.Close, position.ticker)
         metadata[position.ticker] = asdict(meta)
         warnings.extend(meta.warnings)
         if meta.currency != base_currency and meta.currency not in fx:
-            fx[meta.currency] = _series(data.fx_series(meta.currency, base_currency, period), meta.currency)
+            fx[meta.currency] = _series(data.fx_series(meta.currency, base_currency, period, bool(include_incomplete_session)), meta.currency)
     # Intersect prices and FX BEFORE taking returns. No forward filling stale FX or prices.
     frame = pd.concat({**{f"asset:{k}": v for k, v in local.items()},
                        **{f"fx:{k}": v for k, v in fx.items()}}, axis=1).dropna()
-    cutoff = pd.Timestamp(datetime.now(UTC).date())
-    if (frame.index >= cutoff).any():
-        warnings.append("Current UTC-date and future bars excluded to avoid using a possibly incomplete session.")
-        frame = frame.loc[frame.index < cutoff]
     if len(frame) < 161:
         raise data.DataError("at least 161 common complete price/FX observations are required")
     dropped_dates = len(set().union(*(set(s.index) for s in [*local.values(), *fx.values()]))) - len(frame)
@@ -104,6 +103,14 @@ def report(
     if max_gap > 7:
         warnings.append(f"Common observations include gaps of up to {max_gap} calendar days; session risks are not uniform daily risks.")
     dates = [str(d.date()) for d in frame.index]
+    sessions = [data.session_metadata(source_metas[ticker], source_frames[ticker], frame.index[-1]) for ticker in tickers]
+    sessions.extend(data.session_metadata(series.attrs["session_metadata"], series, frame.index[-1])
+                    for series in fx.values() if "session_metadata" in series.attrs)
+    session = sessions[0].copy()
+    session["last_bar_complete"] = (False if any(s["last_bar_complete"] is False for s in sessions)
+                                    else True if all(s["last_bar_complete"] is True for s in sessions) else None)
+    session["include_incomplete_session"] = bool(include_incomplete_session)
+    session["completeness_reason"] = "completion of the last aligned asset and FX sessions"
     base_prices, exposures, holdings = {}, [], []
     for position in positions:
         currency = metadata[position.ticker]["currency"]
@@ -195,6 +202,7 @@ def report(
         "stress_scenarios": stress, "model_status": status, "warnings": warnings,
         "sources": metadata,
         **data.report_metadata(len(dates), n),
+        **session,
         "references": {"fhs_es": "Joint historical return vectors scaled by current/past portfolio sigma; empirical upper-tail loss mean with fractional boundary mass.",
                        "historical": "Unscaled empirical losses on the same FHS sample; inverse empirical CDF VaR.",
                        "variance": "Causal zero-mean second moment; see development report.",
@@ -212,7 +220,7 @@ def report(
         "prices": {k: _snapshot(v) for k, v in local.items()}, "fx": {k: _snapshot(v) for k, v in fx.items()},
         "fx_source": data.SOURCE,
         "metadata": metadata, "common_dates": dates,
-        "calendar_policy": "Intersection of observed asset and FX dates before returns; exclude current UTC-date/future bars; no fills; no annualisation.",
+        "calendar_policy": "Intersection of observed asset and FX dates before returns; shared daily-session completeness policy; future bars excluded; no fills; no annualisation.",
         "price_policy": "Split/dividend-adjusted historical closes; current market values supplied by analyst.",
         "portfolio_returns": portfolio_returns.tolist(),
         "model_returns": model_returns.tolist(),

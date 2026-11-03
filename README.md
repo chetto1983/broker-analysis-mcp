@@ -50,6 +50,16 @@ Unavailable capital metrics include a `reason`, `missing_inputs` and `invalid_in
 and unlevered beta do not require the analyst's CAPM rates. Technical warmup nulls name the
 required observation count. Public parameter bounds appear in the tools' input schemas.
 
+Daily price reports default to completed sessions. Set `include_incomplete_session=true` to
+opt into an open/uncertain daily bar; future bars are always excluded. An omitted/null flag
+uses the completed-only live default. Reports name the aware daily `last_bar_timestamp`,
+`last_bar_complete`, completeness reason and excluded candidates separately from the latest
+trade time and scheduled session end. Equity completion uses provider session boundaries;
+crypto waits for the next UTC midnight. Live alert hooks explicitly retain incomplete-session
+evaluation. Current fundamental quotes and financial statements keep their existing behavior.
+When the provider supplies only an unmatched next-session schedule, the latest bar is excluded
+as uncertain; this conservative choice can lag by one observed row.
+
 `portfolio_risk` makes additive local audit writes. It is a mutating, non-destructive tool;
 repeated calls add fresh timestamped records, so it is not idempotent. Its Yahoo reads remain
 open-world interaction. `custom_analysis` declares local writes because its default chart

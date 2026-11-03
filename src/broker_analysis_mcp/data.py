@@ -33,6 +33,14 @@ class Meta:
     retrieved_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     source: str = SOURCE
     warnings: list[str] = field(default_factory=list)
+    last_bar_timestamp: str | None = None
+    last_bar_complete: bool | None = None
+    include_incomplete_session: bool = False
+    completeness_reason: str = "session metadata unavailable"
+    excluded_candidates: list[dict] = field(default_factory=list)
+    observed_at: str | None = None
+    last_trade_timestamp: str | None = None
+    session_end_timestamp: str | None = None
 
 
 def report_metadata(price_observations: int | None = None, return_observations: int | None = None,
@@ -40,6 +48,90 @@ def report_metadata(price_observations: int | None = None, return_observations: 
     return {"schema_version": 1,
             "retrieved_at": retrieved_at or datetime.now(UTC).isoformat(timespec="seconds"),
             "price_observations": price_observations, "return_observations": return_observations}
+
+
+def session_metadata(meta: Meta | dict, observations=None, date=None) -> dict:
+    details = {key: (meta.get(key) if isinstance(meta, dict) else getattr(meta, key)) for key in (
+        "last_bar_timestamp", "last_bar_complete", "include_incomplete_session", "completeness_reason",
+        "excluded_candidates", "observed_at", "last_trade_timestamp", "session_end_timestamp")}
+    if observations is not None and date is not None and date < observations.index[-1]:
+        labels = observations.attrs.get("source_timestamps", [])
+        details["last_bar_timestamp"] = labels[observations.index.get_loc(date)] if len(labels) == len(observations) else None
+        details["last_bar_complete"] = True
+        details["completeness_reason"] = "aligned historical daily bar precedes a later observed session"
+    return details
+
+
+def _aware(value) -> pd.Timestamp | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        stamp = pd.Timestamp(value, unit="s", tz="UTC") if isinstance(value, (int, float)) else pd.Timestamp(value)
+        return stamp if stamp.tzinfo is not None and not pd.isna(stamp) else None
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _json_metadata(value):
+    if isinstance(value, dict):
+        return {key: _json_metadata(item) for key, item in value.items()}
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    return value
+
+
+def _completed_sessions(prices: pd.DataFrame, metadata: dict, observed: pd.Timestamp, include: bool) -> tuple[pd.DataFrame, dict]:
+    labels = prices.index
+    if labels.tz is None:
+        timezone = metadata.get("exchangeTimezoneName")
+        if not timezone:
+            raise DataError("price history needs an exchange timezone to establish daily sessions")
+        labels = labels.tz_localize(timezone)
+    regular = (metadata.get("currentTradingPeriod") or {}).get("regular") or {}
+    start, end = _aware(regular.get("start")), _aware(regular.get("end"))
+    if start is None or end is None or start >= end:
+        start = end = None
+    crypto = metadata.get("instrumentType") == "CRYPTOCURRENCY"
+    not_future = [i for i, label in enumerate(labels) if label <= observed]
+    latest = not_future[-1] if not_future else -1
+    keep, states, excluded = [], {}, []
+    for i, label in enumerate(labels):
+        complete, reason = None, "session metadata does not establish completion"
+        future = label > observed
+        if future:
+            reason = "future daily bar excluded"
+        elif crypto:
+            boundary = label.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+            complete, reason = observed >= boundary, "crypto daily session ends at next UTC midnight"
+        elif i < latest:
+            complete, reason = True, "a later observed daily session establishes this historical bar"
+        elif start is not None:
+            local_start, local_end = start.tz_convert(labels.tz), end.tz_convert(labels.tz)
+            if label.date() in {local_start.date(), local_end.date()}:
+                future = observed < start
+                complete, reason = observed >= end, "provider regular session end"
+                if future:
+                    reason = "future regular session excluded"
+        states[i] = (complete, reason)
+        if not future and (complete is True or include):
+            keep.append(i)
+        else:
+            excluded.append({"timestamp": label.isoformat(), "complete": complete, "reason": reason})
+    if not keep:
+        raise DataError("insufficient observations: no eligible daily sessions; session metadata or completion is unavailable")
+    selected = prices.iloc[keep].copy()
+    source_labels = labels.take(keep)
+    selected.index = source_labels.tz_localize(None).normalize()
+    selected.attrs["source_timestamps"] = [label.isoformat() for label in source_labels]
+    selected.attrs["provider_metadata"] = _json_metadata(metadata)
+    complete, reason = states[keep[-1]]
+    details = {"last_bar_timestamp": source_labels[-1].isoformat(), "last_bar_complete": complete,
+               "include_incomplete_session": include, "completeness_reason": reason,
+               "excluded_candidates": excluded, "observed_at": observed.isoformat(),
+               "last_trade_timestamp": (_aware(metadata.get("regularMarketTime")).isoformat()
+                                        if _aware(metadata.get("regularMarketTime")) is not None else None),
+               "session_end_timestamp": end.isoformat() if end is not None else None}
+    return selected, details
 
 
 def require_prices(prices: pd.DataFrame, minimum: int = 1, label: str = "price history") -> None:
@@ -62,7 +154,8 @@ def _normalise_currency(prices: pd.DataFrame, currency: str) -> tuple[pd.DataFra
     return prices, currency
 
 
-def history(ticker: str, period: str = "3y") -> tuple[pd.DataFrame, Meta]:
+def history(ticker: str, period: str = "3y", include_incomplete_session: bool = False,
+            *, observed_at: datetime | None = None) -> tuple[pd.DataFrame, Meta]:
     """Daily OHLC adjusted for splits and dividends (total-return closes)."""
     validate_parameters(HistoryParameters, period=period)
     t = yf.Ticker(ticker)
@@ -70,9 +163,13 @@ def history(ticker: str, period: str = "3y") -> tuple[pd.DataFrame, Meta]:
     if prices.empty:
         raise DataError(f"no price history for {ticker!r}")
     prices = prices[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
-    prices.index = prices.index.tz_localize(None).normalize()
+    raw_meta = t.history_metadata or {}
+    meta = {key: raw_meta.get(key) for key in ("currency", "exchangeTimezoneName", "instrumentType", "currentTradingPeriod", "regularMarketTime")}
+    observed = _aware(observed_at or datetime.now(UTC))
+    if observed is None:
+        raise DataError("observed_at must include a timezone")
+    prices, details = _completed_sessions(prices, meta, observed, include_incomplete_session)
     require_prices(prices)
-    meta = t.history_metadata or {}
     currency = meta.get("currency") or t.info.get("currency") or "?"
     prices, currency = _normalise_currency(prices, currency)
     return prices, Meta(
@@ -80,6 +177,9 @@ def history(ticker: str, period: str = "3y") -> tuple[pd.DataFrame, Meta]:
         currency=currency,
         timezone=meta.get("exchangeTimezoneName") or "?",
         periods_per_year=periods_per_year(meta.get("instrumentType") or "?"),
+        retrieved_at=observed.isoformat(),
+        **details,
+        warnings=[f"Excluded {len(details['excluded_candidates'])} incomplete, unknown or future daily bars"] if details["excluded_candidates"] else [],
     )
 
 
@@ -93,13 +193,12 @@ def fx_rate(from_ccy: str, to_ccy: str) -> float:
     return float(closes.iloc[-1])
 
 
-def fx_series(from_ccy: str, to_ccy: str, period: str) -> pd.Series:
+def fx_series(from_ccy: str, to_ccy: str, period: str, include_incomplete_session: bool = False) -> pd.Series:
     if from_ccy == to_ccy:
         raise ValueError("same currency")
-    closes = yf.Ticker(f"{from_ccy}{to_ccy}=X").history(period=period)["Close"].dropna()
-    if closes.empty:
-        raise DataError(f"no FX history for {from_ccy}{to_ccy}")
-    closes.index = closes.index.tz_localize(None).normalize()
+    prices, meta = history(f"{from_ccy}{to_ccy}=X", period, include_incomplete_session)
+    closes = prices["Close"].copy()
+    closes.attrs["session_metadata"] = session_metadata(meta)
     return closes
 
 

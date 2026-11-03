@@ -35,10 +35,11 @@ def run(
     levels: list[LevelSpec],
     chart: bool,
     title: str | None = None,
+    include_incomplete_session: bool | None = None,
 ) -> tuple[dict, str | None]:
     validate_parameters(HistoryParameters, period=period)
     custom.validate_indicators(indicators)
-    prices, meta = data.history(ticker, period)
+    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
     data.require_prices(prices)
     ns, plots = custom.build(prices, indicators, series, meta.periods_per_year)
     reports, marked = [], []
@@ -58,6 +59,7 @@ def run(
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
+        **data.session_metadata(meta),
     }
     png = None
     if chart:

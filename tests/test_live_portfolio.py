@@ -12,7 +12,6 @@ import math
 import os
 import sys
 import tomllib
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -113,8 +112,6 @@ def _reconstruct(snapshot: dict) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     eni = _series(snapshot["prices"]["ENI.MI"])
     usd_eur = _series(snapshot["fx"]["USD"])
     levels = pd.concat({"AAPL": aapl, "ENI.MI": eni, "USDEUR": usd_eur}, axis=1).dropna()
-    cutoff = pd.Timestamp(datetime.fromisoformat(snapshot["created_at"]).date())
-    levels = levels.loc[levels.index < cutoff]
     converted = pd.DataFrame({"AAPL": levels.AAPL * levels.USDEUR, "ENI.MI": levels["ENI.MI"]})
     returns = converted.to_numpy()[1:] / converted.to_numpy()[:-1] - 1
     exposures = np.array([10000 * levels.USDEUR.iloc[-1], -3000.0])

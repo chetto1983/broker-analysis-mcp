@@ -64,6 +64,7 @@ def risk_metrics(
     benchmark: str | None = None,
     risk_free_annual: AnnualRate = 0.0,
     confidence: Confidence = 0.95,
+    include_incomplete_session: bool | None = None,
 ) -> dict:
     """Risk and performance of one security or index from daily total-return prices.
 
@@ -78,7 +79,7 @@ def risk_metrics(
     """
     from . import analysis
 
-    return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence)
+    return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence, include_incomplete_session)
 
 
 @server.tool(annotations=LOCAL_AUDIT)
@@ -87,6 +88,7 @@ def portfolio_risk(
     base_currency: Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")] = "EUR", period: AnalysisPeriod = "5y",
     confidence: PortfolioConfidence = 0.975,
     scenarios: Annotated[list[StressScenario], Field(max_length=20)] | None = None,
+    include_incomplete_session: bool | None = None,
 ) -> dict:
     """Portfolio risk with signed market values in each ticker's quote currency (GBP not GBp).
 
@@ -101,7 +103,7 @@ def portfolio_risk(
     """
     from . import portfolio
 
-    return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios)
+    return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios, include_incomplete_session)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -140,6 +142,7 @@ def technical_indicators(
     bollinger_n: Lookback = 20,
     bollinger_k: BandWidth = 2.0,
     atr_period: WilderPeriod = 14,
+    include_incomplete_session: bool | None = None,
 ) -> dict:
     """Snapshot of standard technical indicators with adjustable parameters: close, two SMAs with
     the price's distance from each, RSI, MACD, Bollinger bands, ATR in currency and as % of the
@@ -152,7 +155,7 @@ def technical_indicators(
         sma_fast=sma_fast, sma_slow=sma_slow, rsi_period=rsi_period, macd_fast=macd_fast, macd_slow=macd_slow,
         macd_signal=macd_signal, bollinger_n=bollinger_n, bollinger_k=bollinger_k, atr_period=atr_period,
     )
-    return _run(analysis.technical_report, ticker, period, params)
+    return _run(analysis.technical_report, ticker, period, params, include_incomplete_session)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -190,13 +193,13 @@ def peer_comparison(tickers: Annotated[list[str], Field(min_length=2, max_length
 
 
 @server.tool(annotations=READ_ONLY)
-def etf_analysis(ticker: str, benchmark: str, period: AnalysisPeriod = "3y") -> dict:
+def etf_analysis(ticker: str, benchmark: str, period: AnalysisPeriod = "3y", include_incomplete_session: bool | None = None) -> dict:
     """ETF cost and replication quality: TER, tracking difference (fund minus benchmark,
     annualised) and tracking error against a benchmark ticker, which is converted to the
     fund's currency. Prefer a total-return index or a reference ETF on the same index."""
     from . import analysis
 
-    return _run(analysis.etf_report, ticker, benchmark, period)
+    return _run(analysis.etf_report, ticker, benchmark, period, include_incomplete_session)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -219,6 +222,7 @@ def custom_analysis(
     levels: list[LevelSpec] | None = None,
     chart: bool = True,
     title: str | None = None,
+    include_incomplete_session: bool | None = None,
 ) -> list:
     """User-defined technical analysis on one ticker, with an optional chart.
 
@@ -237,7 +241,7 @@ def custom_analysis(
     from . import workbench
 
     result, png = _run(
-        workbench.run, ticker, period, indicators, series or [], conditions or [], levels or [], chart, title
+        workbench.run, ticker, period, indicators, series or [], conditions or [], levels or [], chart, title, include_incomplete_session
     )
     content: list = [json.dumps(result, ensure_ascii=False)]
     if png:

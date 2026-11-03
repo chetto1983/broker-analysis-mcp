@@ -147,7 +147,7 @@ def test_risk_short_history_names_observations_and_remedy(monkeypatch, count):
 
 def test_disjoint_etf_history_is_an_insufficient_observations_error(monkeypatch):
     monkeypatch.setattr(data, "info", lambda *a: {"quoteType": "ETF"})
-    def history(ticker, period):
+    def history(ticker, period, include_incomplete_session=False):
         frame = prices()
         if ticker == "B":
             frame.index += pd.DateOffset(years=5)

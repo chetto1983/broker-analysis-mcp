@@ -43,11 +43,11 @@ def _distance(price: float, reference: float) -> float | None:
     return price / reference - 1 if math.isfinite(reference) and reference != 0 else None
 
 
-def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: str) -> pd.DataFrame:
+def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: str, include_incomplete_session: bool = False) -> pd.DataFrame:
     """Converts a price frame into another currency with daily Yahoo FX closes."""
     if meta.currency == currency:
         return prices
-    fx = data.fx_series(meta.currency, currency, period).reindex(prices.index).ffill()
+    fx = data.fx_series(meta.currency, currency, period, include_incomplete_session).reindex(prices.index).ffill()
     converted = prices.copy()
     for col in ("Open", "High", "Low", "Close"):
         converted[col] = converted[col] * fx
@@ -126,9 +126,10 @@ def risk_report(
     benchmark: str | None = None,
     rf_annual: float = 0.0,
     alpha: float = 0.95,
+    include_incomplete_session: bool | None = None,
 ) -> dict:
     validate_parameters(RiskParameters, period=period, risk_free_annual=rf_annual, confidence=alpha)
-    prices, meta = data.history(ticker, period)
+    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
     data.require_prices(prices, 3)
     n = meta.periods_per_year
     r = risk.simple_returns(prices["Close"])
@@ -154,8 +155,8 @@ def risk_report(
         "var_cornish_fisher_1d": _metric(risk.var_cornish_fisher(r, alpha), "%", "var_cornish_fisher"),
     }
     if benchmark:
-        bench_prices, bench_meta = data.history(benchmark, period)
-        bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period)
+        bench_prices, bench_meta = data.history(benchmark, period, bool(include_incomplete_session))
+        bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, bool(include_incomplete_session))
         meta.warnings.extend(bench_meta.warnings)
         common = min(n, bench_meta.periods_per_year)
         metrics |= _benchmark_metrics(prices["Close"], bench_prices["Close"], rf_annual, common, meta.warnings)
@@ -172,6 +173,7 @@ def risk_report(
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), len(r), meta.retrieved_at),
+        **data.session_metadata(meta),
     }
 
 
@@ -183,10 +185,11 @@ def last_52_weeks(prices: pd.DataFrame) -> pd.DataFrame:
 TECHNICAL_DEFAULTS = TechnicalParameters().model_dump()
 
 
-def technical_report(ticker: str, period: str = "1y", params: dict | None = None) -> dict:
+def technical_report(ticker: str, period: str = "1y", params: dict | None = None,
+                     include_incomplete_session: bool | None = None) -> dict:
     validate_parameters(HistoryParameters, period=period)
     p = validate_parameters(TechnicalParameters, **(params or {})).model_dump()
-    prices, meta = data.history(ticker, period)
+    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
     data.require_prices(prices)
     close = prices["Close"]
     last = float(close.iloc[-1])
@@ -243,6 +246,7 @@ def technical_report(ticker: str, period: str = "1y", params: dict | None = None
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
+        **data.session_metadata(meta),
     }
 
 
@@ -382,14 +386,14 @@ def peer_report(tickers: list[str]) -> dict:
     return {"companies": rows, "errors": errors, "references": refs, **data.report_metadata()}
 
 
-def etf_report(ticker: str, benchmark: str, period: str = "3y") -> dict:
+def etf_report(ticker: str, benchmark: str, period: str = "3y", include_incomplete_session: bool | None = None) -> dict:
     validate_parameters(RiskParameters, period=period)
     profile = data.info(ticker)
     if profile.get("quoteType") != "ETF":
         raise data.DataError(f"{ticker!r} is a {profile.get('quoteType')}, not an ETF")
-    fund_prices, meta = data.history(ticker, period)
-    bench_prices, bench_meta = data.history(benchmark, period)
-    bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period)
+    fund_prices, meta = data.history(ticker, period, bool(include_incomplete_session))
+    bench_prices, bench_meta = data.history(benchmark, period, bool(include_incomplete_session))
+    bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, bool(include_incomplete_session))
     data.require_prices(fund_prices)
     data.require_prices(bench_prices)
     aligned = risk.aligned(fund_prices["Close"], bench_prices["Close"])
@@ -433,4 +437,5 @@ def etf_report(ticker: str, benchmark: str, period: str = "3y") -> dict:
         "retrieved_at": meta.retrieved_at,
         "warnings": warnings,
         **data.report_metadata(len(aligned), int(t["observations"]), meta.retrieved_at),
+        **data.session_metadata(meta),
     }
