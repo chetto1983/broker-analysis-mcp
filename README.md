@@ -17,7 +17,7 @@ its dependencies and Python 3.13 if it is missing.
 | --- | --- |
 | Claude Code | `/plugin marketplace add chetto1983/broker-analysis-mcp`, then `/plugin install broker-analysis@broker-analysis-mcp` |
 | Codex | `codex plugin marketplace add chetto1983/broker-analysis-mcp`, then `codex plugin add broker-analysis@broker-analysis-mcp` |
-| Aura | `aura pack install chetto1983/broker-analysis-mcp/broker-analysis`, then `aura pack trust chetto1983/broker-analysis-mcp/broker-analysis --class sandboxed_local --reason "..."`; the server runs in each identity's sandbox box |
+| Aura | Install `chetto1983/broker-analysis-mcp/broker-analysis` from the cockpit's Governance plugin board; upgrade an existing installation from the same board. The server runs in each identity's sandbox box. |
 
 > **Prototype only.** yfinance reads Yahoo's unofficial endpoints, is meant for personal and
 > research use, and can break without notice. Production needs a licensed data source
