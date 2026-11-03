@@ -29,6 +29,13 @@ def _check_new_id(spec_id: str, ns: dict[str, pd.Series]) -> None:
         raise SpecError(f"duplicate series id {spec_id!r}")
 
 
+def validate_indicators(indicators: list[IndicatorSpec]) -> None:
+    for spec in indicators:
+        if spec.fn not in CATALOG:
+            raise SpecError(f"unknown indicator {spec.fn!r}; available: {sorted(CATALOG)}")
+        resolve_params(spec.fn, spec.params)
+
+
 def build(
     prices: pd.DataFrame, indicators: list[IndicatorSpec], series: list[SeriesSpec], periods: int = 252
 ) -> tuple[dict[str, pd.Series], list[dict]]:

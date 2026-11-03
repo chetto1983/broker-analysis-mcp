@@ -83,9 +83,10 @@ def check_action(action: HookAction) -> None:
 
 
 def _evaluate(hook: dict, loader: Loader) -> tuple[pd.DataFrame, dict, pd.Series, data.Meta]:
-    prices, meta = loader(hook["ticker"], hook["period"])
     indicators = [IndicatorSpec(**i) for i in hook["indicators"]]
     series = [SeriesSpec(**s) for s in hook["series"]]
+    custom.validate_indicators(indicators)
+    prices, meta = loader(hook["ticker"], hook["period"])
     ns, _ = custom.build(prices, indicators, series, meta.periods_per_year)
     _, events = custom.condition_series(ConditionSpec(**hook["condition"]), ns)
     return prices, ns, events, meta

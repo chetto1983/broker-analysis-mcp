@@ -82,6 +82,44 @@ def test_mcp_invalid_input_is_actionable_before_yahoo(no_yahoo, tool, arguments,
     assert not isinstance(error.value, UnexpectedToolError)
 
 
+@pytest.mark.parametrize("tool", ["create_hook", "custom_analysis"])
+@pytest.mark.parametrize("indicator", [
+    {"id": "r", "fn": "rsi", "params": {"n": 0}},
+    {"id": "r", "fn": "rsi", "params": {"n": 2.5}},
+    {"id": "r", "fn": "rsi", "params": {"n": float("nan")}},
+    {"id": "r", "fn": "unknown", "params": {}},
+])
+def test_catalog_parameters_fail_at_public_boundary_before_provider_or_storage(monkeypatch, tmp_path, tool, indicator):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid input reached Yahoo Finance")
+    monkeypatch.setattr(data.yf, "Ticker", forbidden)
+    home = tmp_path / "uncreated-home"
+    monkeypatch.setenv("BROKER_ANALYSIS_HOME", str(home))
+    arguments = {"ticker": "AAPL", "indicators": [indicator]}
+    if tool == "create_hook":
+        arguments |= {"name": "invalid", "condition": {"name": "oversold", "when": "r < 30"},
+                      "action": {"type": "file", "target": "alerts"}}
+    with pytest.raises(ToolError, match=r"rsi|unknown") as error:
+        asyncio.run(server.server.call_tool(tool, arguments))
+    assert not isinstance(error.value, UnexpectedToolError)
+    assert not home.exists()
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), -float("inf")])
+def test_chart_level_price_is_finite_at_public_boundary_before_provider_or_storage(monkeypatch, tmp_path, price):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("invalid level reached Yahoo Finance")
+    monkeypatch.setattr(data.yf, "Ticker", forbidden)
+    home = tmp_path / "uncreated-home"
+    monkeypatch.setenv("BROKER_ANALYSIS_HOME", str(home))
+    with pytest.raises(ToolError, match=r"levels.0.price") as error:
+        asyncio.run(server.server.call_tool("custom_analysis", {
+            "ticker": "AAPL", "indicators": [], "levels": [{"price": price}],
+        }))
+    assert not isinstance(error.value, UnexpectedToolError)
+    assert not home.exists()
+
+
 @pytest.mark.parametrize("call", [
     lambda: analysis.risk_report("AAPL", alpha=1.2),
     lambda: analysis.technical_report("AAPL", params={"rsi_period": 0}),

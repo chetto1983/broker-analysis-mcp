@@ -100,7 +100,7 @@ class ConditionSpec(BaseModel):
 class LevelSpec(BaseModel):
     """A horizontal level drawn on the price chart."""
 
-    price: float
+    price: Finite
     label: Annotated[str, Field(max_length=40)] = ""
 
 

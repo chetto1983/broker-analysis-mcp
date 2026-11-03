@@ -4,6 +4,8 @@ Public tools keep their existing fields and financial formulas. Added input-sche
 report-boundary validation before Yahoo calls, including finite numbers, supported periods,
 catalog lookbacks and MACD ordering. Invalid inputs remain actionable domain errors; arbitrary
 internal exceptions remain hidden, including individual failures in peer comparisons.
+Hook creation shares the indicator preflight before price retrieval or persistence, and chart
+level prices must be finite at the public MCP boundary.
 
 Short and disjoint histories name the observation requirement. Technical warmup nulls name
 their required price count, and a zero Bollinger reference is explicitly undefined. Capital
@@ -26,7 +28,7 @@ must be measured separately from this offline contract check.
 
 ## Verification on 2026-11-03
 
-- 247 offline tests passed, including 42 new contract cases and existing stdio/audit tests.
+- 258 offline tests passed, including 53 new contract cases and existing stdio/audit tests.
 - Ruff passed.
 - Source distribution and wheel built successfully with `uv build --offline`.
 - Windows' pre-existing pytest temp/cache directories deny access; the suite used an isolated

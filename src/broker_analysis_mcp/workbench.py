@@ -5,7 +5,7 @@ import re
 from datetime import UTC, datetime
 
 from . import custom, data, expr
-from .catalog import CATALOG, SpecError, describe, resolve_params
+from .catalog import describe
 from .hooks import home
 from .models import ConditionSpec, HistoryParameters, IndicatorSpec, LevelSpec, SeriesSpec, validate_parameters
 
@@ -37,10 +37,7 @@ def run(
     title: str | None = None,
 ) -> tuple[dict, str | None]:
     validate_parameters(HistoryParameters, period=period)
-    for spec in indicators:
-        if spec.fn not in CATALOG:
-            raise SpecError(f"unknown indicator {spec.fn!r}; available: {sorted(CATALOG)}")
-        resolve_params(spec.fn, spec.params)
+    custom.validate_indicators(indicators)
     prices, meta = data.history(ticker, period)
     data.require_prices(prices)
     ns, plots = custom.build(prices, indicators, series, meta.periods_per_year)
