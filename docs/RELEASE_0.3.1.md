@@ -36,6 +36,13 @@ must be measured separately from this offline contract check.
 - Live Yahoo calls, the installed Aura pack, VM startup and release publication remain the
   coordinating integration run's responsibility; this preparation does not establish them.
 
-The package, lockfile, plugin versions and both launchers are prepared for 0.3.1. The launchers
-will be pinned to the verified immutable source commit by the coordinating release step;
-no release tag or package is published by this preparation.
+The package, lockfile and plugin versions identify 0.3.1. Both launchers pin the verified
+source commit `edbb0312c97aaf22900406e01d112a99fe1296b6`, so uv reuses its cached environment
+without resolving a Git tag. The packaging regression first failed on the tag and then passed
+with the immutable source; the whole offline suite remains at 258 passing tests.
+
+An initial measurement in Aura's actual box, using the candidate source and its existing uv
+environment, returned all 14 tools in 1.88 and 2.09 seconds. The older server in the same
+commit-pinned environment took 5.92 seconds in the adjacent sample. These are sequential
+samples on one VM with warm caches, not an empty-cache benchmark or a latency percentile.
+The installed plugin and final daemon acceptance are recorded separately by the coordinator.

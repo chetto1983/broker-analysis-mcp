@@ -9,7 +9,7 @@ server and the five skills together.
 
 ## Install
 
-The plugin starts the server with `uvx` from this repository's release tag, so the machine that
+The plugin starts the server with `uvx` from an immutable full commit of this repository, so the machine that
 runs it needs `uv` and `git`, and network access on the first start, when uv fetches the package,
 its dependencies and Python 3.13 if it is missing.
 
@@ -150,10 +150,13 @@ They are written in English and tell the agent to answer in the analyst's langua
 
 ## Release
 
-`.mcp.json` launches the server from the tag `v<version>`. A release bumps the version in
-`pyproject.toml`, the package metadata in `uv.lock`, all three plugin manifests (root, Claude,
-Codex), and the tag named by both `.mcp.json` and `mcp.json`, then tags the tested commit.
-`tests/test_plugin_manifest.py` checks the plugin and launcher versions against the package.
+Both `.mcp.json` and `mcp.json` launch the server from the same full 40-character commit.
+A release first commits the tested server with its new version in `pyproject.toml`, `uv.lock`
+and all three plugin manifests, then a packaging commit pins both launchers to that server
+commit. Tag the tested packaging commit. A cached Git tag still requires remote resolution
+on each start; a full commit lets uv reuse the environment and works offline after warming.
+`tests/test_plugin_manifest.py` checks manifest versions and immutable, matching launchers;
+the installed MCP smoke verifies the pinned package version and behavior.
 
 ## Run
 

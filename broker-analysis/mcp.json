@@ -6,7 +6,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/chetto1983/broker-analysis-mcp@v0.3.1",
+        "git+https://github.com/chetto1983/broker-analysis-mcp@edbb0312c97aaf22900406e01d112a99fe1296b6",
         "broker-analysis-mcp"
       ]
     }

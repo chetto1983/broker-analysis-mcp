@@ -1,7 +1,7 @@
-"""The plugin launches the server from a git tag, so a release that bumps one version and not the
-others ships manifests that start a different server than the one they describe."""
+"""Plugin metadata stays coherent and launchers select immutable, cacheable server code."""
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -32,10 +32,12 @@ def test_both_manifests_carry_the_package_version():
     assert _json(PLUGIN / ".codex-plugin" / "plugin.json")["version"] == version
 
 
-def test_the_server_launches_from_the_tag_of_this_version():
+def test_the_server_launches_from_an_immutable_commit():
     server = _json(PLUGIN / ".mcp.json")["mcpServers"]["broker-analysis"]
     source = server["args"][server["args"].index("--from") + 1]
-    assert source == f"git+https://github.com/chetto1983/broker-analysis-mcp@v{_package_version()}"
+    prefix = "git+https://github.com/chetto1983/broker-analysis-mcp@"
+    assert source.startswith(prefix)
+    assert re.fullmatch(r"[0-9a-f]{40}", source.removeprefix(prefix)), "tags require network resolution on each start"
     assert server["args"][-1] == "broker-analysis-mcp"
 
 
