@@ -5,6 +5,7 @@ use, and can break without notice. Every result carries its source and retrieval
 analyst can tell where a number came from.
 """
 
+import math
 import warnings
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,17 +13,15 @@ from datetime import UTC, datetime
 import pandas as pd
 import yfinance as yf
 
+from .errors import DataError
 from .fundamentals import Year
+from .models import HistoryParameters, validate_parameters
 from .risk import PERIODS, periods_per_year
 
 SOURCE = "Yahoo Finance via yfinance (unofficial, prototype only)"
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", module="yfinance")
-
-
-class DataError(ValueError):
-    """The source returned nothing usable for the request."""
 
 
 @dataclass
@@ -34,6 +33,23 @@ class Meta:
     retrieved_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat(timespec="seconds"))
     source: str = SOURCE
     warnings: list[str] = field(default_factory=list)
+
+
+def report_metadata(price_observations: int | None = None, return_observations: int | None = None,
+                    retrieved_at: str | None = None) -> dict:
+    return {"schema_version": 1,
+            "retrieved_at": retrieved_at or datetime.now(UTC).isoformat(timespec="seconds"),
+            "price_observations": price_observations, "return_observations": return_observations}
+
+
+def require_prices(prices: pd.DataFrame, minimum: int = 1, label: str = "price history") -> None:
+    if len(prices) < minimum:
+        raise DataError(f"insufficient observations for {label}: {len(prices)} prices, need at least {minimum}; request a longer period")
+    if prices.index.has_duplicates or not prices.index.is_monotonic_increasing:
+        raise DataError(f"{label}: duplicate or unordered dates")
+    columns = [c for c in ("Open", "High", "Low", "Close") if c in prices]
+    if "Close" not in columns or not all(math.isfinite(v) and v > 0 for v in prices[columns].to_numpy().flat):
+        raise DataError(f"{label}: prices must be finite and positive")
 
 
 def _normalise_currency(prices: pd.DataFrame, currency: str) -> tuple[pd.DataFrame, str]:
@@ -48,12 +64,14 @@ def _normalise_currency(prices: pd.DataFrame, currency: str) -> tuple[pd.DataFra
 
 def history(ticker: str, period: str = "3y") -> tuple[pd.DataFrame, Meta]:
     """Daily OHLC adjusted for splits and dividends (total-return closes)."""
+    validate_parameters(HistoryParameters, period=period)
     t = yf.Ticker(ticker)
     prices = t.history(period=period, interval="1d", auto_adjust=True)
     if prices.empty:
         raise DataError(f"no price history for {ticker!r}")
     prices = prices[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
     prices.index = prices.index.tz_localize(None).normalize()
+    require_prices(prices)
     meta = t.history_metadata or {}
     currency = meta.get("currency") or t.info.get("currency") or "?"
     prices, currency = _normalise_currency(prices, currency)

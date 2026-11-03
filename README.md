@@ -1,6 +1,6 @@
 # broker-analysis-mcp
 
-Prototype of a **read-only MCP server for financial analysis** for a broker's analysts, with
+Prototype of an **MCP server for financial analysis** for a broker's analysts, with
 skills that teach the agent how to read every number. Data from Yahoo Finance through
 `yfinance`.
 
@@ -41,6 +41,20 @@ its dependencies and Python 3.13 if it is missing.
 
 Every metric carries its unit and the key of the formula it came from (`references.py`, with
 arXiv sources where one exists), plus the data window, source and warnings.
+
+Analysis reports also include `schema_version`, `retrieved_at`, `price_observations` and
+`return_observations`. Counts describe the primary history, the common price calendar for
+portfolio/ETF reports, or are null for statement-based fundamentals/peer comparisons. Existing
+`window.days`, `window.bars`, `window.returns` and `aligned_days` fields keep their meanings.
+Unavailable capital metrics include a `reason`, `missing_inputs` and `invalid_inputs`; debt cost
+and unlevered beta do not require the analyst's CAPM rates. Technical warmup nulls name the
+required observation count. Public parameter bounds appear in the tools' input schemas.
+
+`portfolio_risk` makes additive local audit writes. It is a mutating, non-destructive tool;
+repeated calls add fresh timestamped records, so it is not idempotent. Its Yahoo reads remain
+open-world interaction. `custom_analysis` declares local writes because its default chart
+option saves PNG/JSON files. Hook tools retain their file/webhook effects. No trading operations
+are provided.
 
 ### Portfolio risk and model records
 

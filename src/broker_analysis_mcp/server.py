@@ -1,4 +1,4 @@
-"""Read-only MCP server for financial analysis on Yahoo Finance data (prototype).
+"""MCP server for financial analysis on Yahoo Finance data (prototype).
 
 Every tool returns computed numbers with unit, formula reference, data window, source and
 warnings. The model interprets them; it never computes a metric itself.
@@ -6,19 +6,38 @@ warnings. The model interprets them; it never computes a metric itself.
 
 import json
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import Field
 
-from . import analysis, audit, hooks, portfolio, workbench
-from .catalog import SpecError
-from .data import DataError
-from .models import ConditionSpec, HookAction, IndicatorSpec, LevelSpec, Position, SeriesSpec, StressScenario
+from .errors import DataError, SpecError
+from .models import (
+    AnalysisPeriod,
+    AnnualRate,
+    BandWidth,
+    ConditionSpec,
+    Confidence,
+    Finite,
+    HistoryPeriod,
+    HookAction,
+    IndicatorSpec,
+    LevelSpec,
+    Lookback,
+    MACDSignal,
+    MACDSlow,
+    PortfolioConfidence,
+    Position,
+    PositiveAmount,
+    SeriesSpec,
+    StressScenario,
+    WilderPeriod,
+)
 
 INSTRUCTIONS = (
-    "Read-only financial analysis on Yahoo Finance data (prototype, unofficial source). "
+    "Financial analysis on Yahoo Finance data (prototype, unofficial source); no trading operations. "
     "Use these tools for every number you report; quote each value with its unit, data window "
     "and source; never compute a metric yourself. Yahoo tickers: Milan .MI, London .L, "
     "Xetra .DE, Paris .PA, Amsterdam .AS; indices start with ^ (^GSPC, ^SP500TR, FTSEMIB.MI)."
@@ -27,6 +46,8 @@ INSTRUCTIONS = (
 server = MCPServer("broker-analysis", instructions=INSTRUCTIONS)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 WRITES_HOOKS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
+# Yahoo reads are open-world; each run adds fresh timestamped local records.
+LOCAL_AUDIT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 
 
 def _run(fn: Callable[..., Any], *args: Any) -> Any:
@@ -39,10 +60,10 @@ def _run(fn: Callable[..., Any], *args: Any) -> Any:
 @server.tool(annotations=READ_ONLY)
 def risk_metrics(
     ticker: str,
-    period: str = "3y",
+    period: AnalysisPeriod = "3y",
     benchmark: str | None = None,
-    risk_free_annual: float = 0.0,
-    confidence: float = 0.95,
+    risk_free_annual: AnnualRate = 0.0,
+    confidence: Confidence = 0.95,
 ) -> dict:
     """Risk and performance of one security or index from daily total-return prices.
 
@@ -55,13 +76,17 @@ def risk_metrics(
     up and down capture on monthly returns. period: 1y, 2y, 3y, 5y, 10y or max. risk_free_annual
     as a decimal (0.03 = 3%).
     """
+    from . import analysis
+
     return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence)
 
 
-@server.tool(annotations=WRITES_HOOKS)
+@server.tool(annotations=LOCAL_AUDIT)
 def portfolio_risk(
-    positions: list[Position], portfolio_value: float, base_currency: str = "EUR", period: str = "5y",
-    confidence: float = 0.975, scenarios: list[StressScenario] | None = None,
+    positions: Annotated[list[Position], Field(min_length=1, max_length=30)], portfolio_value: PositiveAmount,
+    base_currency: Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")] = "EUR", period: AnalysisPeriod = "5y",
+    confidence: PortfolioConfidence = 0.975,
+    scenarios: Annotated[list[StressScenario], Field(max_length=20)] | None = None,
 ) -> dict:
     """Portfolio risk with signed market values in each ticker's quote currency (GBP not GBp).
 
@@ -74,6 +99,8 @@ def portfolio_risk(
     Saves immutable local snapshots and development, validation and monitoring reports.
     Use returned audit.record_id with model_status and analysis_record. No trades are placed.
     """
+    from . import portfolio
+
     return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios)
 
 
@@ -82,6 +109,8 @@ def model_status(record_id: str) -> dict:
     """Verified model decision AS OF a saved portfolio run: champion, fallback reason, baselines,
     validation window, recent QLIKE and coverage diagnostics. Refresh with portfolio_risk to
     monitor new data; this lookup neither fetches prices nor schedules monitoring."""
+    from . import audit
+
     return _run(audit.record, record_id, "monitoring")["decision"]
 
 
@@ -93,28 +122,32 @@ def analysis_record(
     """Read a saved portfolio result, exact data snapshot, or separate model report. Verify the
     manifest and all linked SHA-256 objects before returning. Local application-immutable
     storage detects modification; it is not externally certified WORM storage."""
+    from . import audit
+
     return _run(audit.record, record_id, section)
 
 
 @server.tool(annotations=READ_ONLY)
 def technical_indicators(
     ticker: str,
-    period: str = "1y",
-    sma_fast: int = 50,
-    sma_slow: int = 200,
-    rsi_period: int = 14,
-    macd_fast: int = 12,
-    macd_slow: int = 26,
-    macd_signal: int = 9,
-    bollinger_n: int = 20,
-    bollinger_k: float = 2.0,
-    atr_period: int = 14,
+    period: HistoryPeriod = "1y",
+    sma_fast: Lookback = 50,
+    sma_slow: Lookback = 200,
+    rsi_period: WilderPeriod = 14,
+    macd_fast: WilderPeriod = 12,
+    macd_slow: MACDSlow = 26,
+    macd_signal: MACDSignal = 9,
+    bollinger_n: Lookback = 20,
+    bollinger_k: BandWidth = 2.0,
+    atr_period: WilderPeriod = 14,
 ) -> dict:
     """Snapshot of standard technical indicators with adjustable parameters: close, two SMAs with
     the price's distance from each, RSI, MACD, Bollinger bands, ATR in currency and as % of the
     close, 52-week high and low with distances. Keys carry the period (sma50, rsi14, atr14).
     Use a period long enough for the slow SMA. For custom indicators, expressions, conditions or
     a chart use custom_analysis."""
+    from . import analysis
+
     params = dict(
         sma_fast=sma_fast, sma_slow=sma_slow, rsi_period=rsi_period, macd_fast=macd_fast, macd_slow=macd_slow,
         macd_signal=macd_signal, bollinger_n=bollinger_n, bollinger_k=bollinger_k, atr_period=atr_period,
@@ -125,9 +158,9 @@ def technical_indicators(
 @server.tool(annotations=READ_ONLY)
 def fundamental_ratios(
     ticker: str,
-    risk_free_annual: float | None = None,
-    equity_risk_premium: float | None = None,
-    beta: float | None = None,
+    risk_free_annual: AnnualRate | None = None,
+    equity_risk_premium: Finite | None = None,
+    beta: Finite | None = None,
 ) -> dict:
     """Ratios from the latest annual statements (USMx accounting and financial ratios sheet):
     valuation (P/E, EV/EBITDA, EV/EBIT, P/B, P/S, FCF yield), profitability and DuPont (ROE = net
@@ -139,24 +172,30 @@ def fundamental_ratios(
     (financial strength, 0-9), Altman Z and Z'' (distress) and Beneish M-score (earnings
     manipulation), with their components in `scores`; not computed for banks and insurers.
     Ratios not meaningful (losses, banks without current assets) are null."""
+    from . import analysis
+
     return _run(analysis.fundamentals_report, ticker, risk_free_annual, equity_risk_premium, beta)
 
 
 @server.tool(annotations=READ_ONLY)
-def peer_comparison(tickers: list[str]) -> dict:
+def peer_comparison(tickers: Annotated[list[str], Field(min_length=2, max_length=10)]) -> dict:
     """Fundamental ratios and scores for several companies side by side (2 to 10 tickers), for
     relative valuation within one sector. Failed tickers are reported, not dropped silently.
     Score components and their inputs are left out: call fundamental_ratios for one company."""
+    from . import analysis
+
     if not 2 <= len(tickers) <= 10:
         raise ToolError("pass between 2 and 10 tickers")
     return analysis.peer_report(tickers)
 
 
 @server.tool(annotations=READ_ONLY)
-def etf_analysis(ticker: str, benchmark: str, period: str = "3y") -> dict:
+def etf_analysis(ticker: str, benchmark: str, period: AnalysisPeriod = "3y") -> dict:
     """ETF cost and replication quality: TER, tracking difference (fund minus benchmark,
     annualised) and tracking error against a benchmark ticker, which is converted to the
     fund's currency. Prefer a total-return index or a reference ETF on the same index."""
+    from . import analysis
+
     return _run(analysis.etf_report, ticker, benchmark, period)
 
 
@@ -165,14 +204,16 @@ def list_indicator_catalog() -> dict:
     """Parametric building blocks for custom_analysis and create_hook: every catalog indicator with
     its typed parameters (default, min, max), outputs and pane; the functions allowed in
     expressions and conditions; the expression syntax."""
+    from . import workbench
+
     return workbench.catalog()
 
 
-@server.tool(annotations=READ_ONLY, structured_output=False)
+@server.tool(annotations=LOCAL_AUDIT, structured_output=False)
 def custom_analysis(
     ticker: str,
     indicators: list[IndicatorSpec],
-    period: str = "1y",
+    period: HistoryPeriod = "1y",
     series: list[SeriesSpec] | None = None,
     conditions: list[ConditionSpec] | None = None,
     levels: list[LevelSpec] | None = None,
@@ -193,6 +234,8 @@ def custom_analysis(
     levels: horizontal lines, e.g. [{"price": 25.5, "label": "support"}].
     Returns JSON with last values and condition reports, plus the PNG chart when chart is true.
     Call list_indicator_catalog first to see indicators, parameters and functions."""
+    from . import workbench
+
     result, png = _run(
         workbench.run, ticker, period, indicators, series or [], conditions or [], levels or [], chart, title
     )
@@ -210,7 +253,7 @@ def create_hook(
     action: HookAction,
     indicators: list[IndicatorSpec] | None = None,
     series: list[SeriesSpec] | None = None,
-    period: str = "2y",
+    period: HistoryPeriod = "2y",
 ) -> dict:
     """Save a condition hook: when the condition fires on a new bar, a JSON event is delivered.
 
@@ -218,24 +261,32 @@ def create_hook(
     {"type": "webhook", "target": "https://..."} posts JSON (only to prefixes the operator allowed).
     Past events are not replayed. Hooks are evaluated by run_hooks or the broker-analysis-hooks
     command (schedule it with cron). Analysis alerts only: nothing is ever traded."""
+    from . import hooks
+
     return _run(hooks.create, name, ticker, condition, action, indicators or [], series or [], period)
 
 
 @server.tool(annotations=READ_ONLY)
 def list_hooks() -> dict:
     """Saved condition hooks with their condition, action and last delivered event."""
+    from . import hooks
+
     return {"hooks": list(hooks.load_hooks().values())}
 
 
 @server.tool(annotations=WRITES_HOOKS)
 def run_hooks() -> dict:
     """Evaluate every saved hook now and deliver the events newer than each hook's last one."""
+    from . import hooks
+
     return hooks.run()
 
 
 @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True))
 def delete_hook(hook_id: str) -> dict:
     """Delete a saved hook by id."""
+    from . import hooks
+
     return {"deleted": hooks.delete(hook_id), "hook_id": hook_id}
 
 

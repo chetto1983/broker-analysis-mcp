@@ -2,7 +2,66 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from .errors import SpecError
+
+AnalysisPeriod = Literal["1y", "2y", "3y", "5y", "10y", "max"]
+HistoryPeriod = Literal["1d", "5d", "1mo", "3mo", "6mo", "ytd", "1y", "2y", "3y", "5y", "10y", "max"]
+Finite = Annotated[float, Field(allow_inf_nan=False)]
+AnnualRate = Annotated[float, Field(gt=-1, allow_inf_nan=False)]
+Confidence = Annotated[float, Field(gt=0, lt=1, allow_inf_nan=False)]
+PortfolioConfidence = Annotated[float, Field(ge=.90, le=.99, allow_inf_nan=False)]
+PositiveAmount = Annotated[float, Field(gt=0, allow_inf_nan=False)]
+Lookback = Annotated[int, Field(ge=2, le=1000)]
+WilderPeriod = Annotated[int, Field(ge=2, le=200)]
+MACDSlow = Annotated[int, Field(ge=3, le=400)]
+MACDSignal = Annotated[int, Field(ge=2, le=100)]
+BandWidth = Annotated[float, Field(ge=.1, le=5, allow_inf_nan=False)]
+
+
+class RiskParameters(BaseModel):
+    period: AnalysisPeriod = "3y"
+    risk_free_annual: AnnualRate = 0.0
+    confidence: Confidence = .95
+
+
+class HistoryParameters(BaseModel):
+    period: HistoryPeriod = "1y"
+
+
+class CapitalParameters(BaseModel):
+    risk_free_annual: AnnualRate | None = None
+    equity_risk_premium: Finite | None = None
+    beta: Finite | None = None
+
+
+class TechnicalParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sma_fast: Lookback = 50
+    sma_slow: Lookback = 200
+    rsi_period: WilderPeriod = 14
+    macd_fast: WilderPeriod = 12
+    macd_slow: MACDSlow = 26
+    macd_signal: MACDSignal = 9
+    bollinger_n: Lookback = 20
+    bollinger_k: BandWidth = 2.0
+    atr_period: WilderPeriod = 14
+
+    @model_validator(mode="after")
+    def ordered_macd(self):
+        from .catalog import resolve_params
+
+        resolve_params("macd", {"fast": self.macd_fast, "slow": self.macd_slow, "signal": self.macd_signal})
+        return self
+
+
+def validate_parameters(model: type[BaseModel], **values) -> BaseModel:
+    try:
+        return model(**values)
+    except ValidationError as err:
+        raise SpecError(f"invalid input: {err}") from err
 
 SeriesId = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]{0,31}$", description="lowercase id, e.g. ema_fast")]
 Color = Annotated[str, Field(pattern=r"^#[0-9a-fA-F]{6}$")]

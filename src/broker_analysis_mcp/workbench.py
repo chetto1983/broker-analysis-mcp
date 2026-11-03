@@ -4,10 +4,10 @@ import json
 import re
 from datetime import UTC, datetime
 
-from . import charts, custom, data, expr
-from .catalog import describe
+from . import custom, data, expr
+from .catalog import CATALOG, SpecError, describe, resolve_params
 from .hooks import home
-from .models import ConditionSpec, IndicatorSpec, LevelSpec, SeriesSpec
+from .models import ConditionSpec, HistoryParameters, IndicatorSpec, LevelSpec, SeriesSpec, validate_parameters
 
 
 def chart_dir():
@@ -36,7 +36,13 @@ def run(
     chart: bool,
     title: str | None = None,
 ) -> tuple[dict, str | None]:
+    validate_parameters(HistoryParameters, period=period)
+    for spec in indicators:
+        if spec.fn not in CATALOG:
+            raise SpecError(f"unknown indicator {spec.fn!r}; available: {sorted(CATALOG)}")
+        resolve_params(spec.fn, spec.params)
     prices, meta = data.history(ticker, period)
+    data.require_prices(prices)
     ns, plots = custom.build(prices, indicators, series, meta.periods_per_year)
     reports, marked = [], []
     for spec in conditions:
@@ -54,9 +60,12 @@ def run(
         "source": meta.source,
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
+        **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
     }
     png = None
     if chart:
+        from . import charts
+
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         base = chart_dir() / f"{re.sub(r'[^A-Za-z0-9]+', '_', ticker)}_{stamp}"
         png = charts.render(

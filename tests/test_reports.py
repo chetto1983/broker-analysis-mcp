@@ -67,7 +67,7 @@ def test_peer_report_shares_references_and_drops_score_components(monkeypatch) -
     monkeypatch.setattr(analysis, "fundamentals_report", fake_report)
     r = analysis.peer_report(["A", "BAD", "BOOM", "B"])
     assert set(r["companies"]) == {"A", "B"}
-    assert r["errors"] == {"BAD": "no profile for 'BAD'", "BOOM": "RuntimeError: rate limited"}
+    assert r["errors"] == {"BAD": "no profile for 'BAD'", "BOOM": "analysis failed; retry or check server logs"}
     assert r["references"] == {"ref_A": "x", "ref_B": "x"}
     assert all("scores" not in c and "references" not in c for c in r["companies"].values())
 

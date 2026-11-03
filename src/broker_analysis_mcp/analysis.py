@@ -4,6 +4,7 @@ Every metric carries its value, unit and the key of the formula it came from (re
 so the agent can quote a number with its method and never has to compute one itself.
 """
 
+import logging
 import math
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -11,19 +12,35 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pandas as pd
 
 from . import data, indicators, risk, scores
-from .fundamentals import CapitalInputs, Year, cost_of_capital, interest_warning, ratios
+from .fundamentals import (
+    CapitalInputs,
+    Year,
+    capital_diagnostics,
+    cost_of_capital,
+    interest_rate,
+    interest_warning,
+    ratios,
+    unlevered_beta,
+)
+from .models import CapitalParameters, HistoryParameters, RiskParameters, TechnicalParameters, validate_parameters
 from .references import REFERENCES
+
+logger = logging.getLogger(__name__)
 
 
 def _metric(value: float | None, unit: str, ref: str, digits: int = 4) -> dict:
     if value is None or (isinstance(value, float) and not math.isfinite(value)):
-        return {"value": None, "unit": unit, "ref": ref}
+        return {"value": None, "unit": unit, "ref": ref, "reason": "input unavailable or metric undefined for these observations"}
     scaled = value * 100 if unit == "%" else value
     return {"value": round(scaled, digits), "unit": unit, "ref": ref}
 
 
 def _window(prices: pd.DataFrame) -> dict:
     return {"start": str(prices.index[0].date()), "end": str(prices.index[-1].date()), "days": len(prices)}
+
+
+def _distance(price: float, reference: float) -> float | None:
+    return price / reference - 1 if math.isfinite(reference) and reference != 0 else None
 
 
 def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: str) -> pd.DataFrame:
@@ -68,6 +85,7 @@ def _benchmark_metrics(
     """Measures against a benchmark on the dates both trade: prices are aligned before any return
     is taken, so a Monday return spans the same days for a crypto asset and for a stock index."""
     prices = risk.aligned(close, bench_close)
+    data.require_prices(prices.rename(columns={prices.columns[0]: "Close"}), 3, "aligned benchmark history")
     daily = prices.pct_change().dropna()
     r, b = daily.iloc[:, 0], daily.iloc[:, 1]
     weekly = risk.weekly_returns(prices)
@@ -109,7 +127,9 @@ def risk_report(
     rf_annual: float = 0.0,
     alpha: float = 0.95,
 ) -> dict:
+    validate_parameters(RiskParameters, period=period, risk_free_annual=rf_annual, confidence=alpha)
     prices, meta = data.history(ticker, period)
+    data.require_prices(prices, 3)
     n = meta.periods_per_year
     r = risk.simple_returns(prices["Close"])
     sr = risk.sharpe(r, rf_annual, n)
@@ -151,6 +171,7 @@ def risk_report(
         "source": meta.source,
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
+        **data.report_metadata(len(prices), len(r), meta.retrieved_at),
     }
 
 
@@ -159,15 +180,14 @@ def last_52_weeks(prices: pd.DataFrame) -> pd.DataFrame:
     return prices.loc[prices.index > prices.index[-1] - pd.DateOffset(weeks=52)]
 
 
-TECHNICAL_DEFAULTS = dict(
-    sma_fast=50, sma_slow=200, rsi_period=14, macd_fast=12, macd_slow=26, macd_signal=9,
-    bollinger_n=20, bollinger_k=2.0, atr_period=14,
-)
+TECHNICAL_DEFAULTS = TechnicalParameters().model_dump()
 
 
 def technical_report(ticker: str, period: str = "1y", params: dict | None = None) -> dict:
-    p = TECHNICAL_DEFAULTS | (params or {})
+    validate_parameters(HistoryParameters, period=period)
+    p = validate_parameters(TechnicalParameters, **(params or {})).model_dump()
     prices, meta = data.history(ticker, period)
+    data.require_prices(prices)
     close = prices["Close"]
     last = float(close.iloc[-1])
     fast, slow = p["sma_fast"], p["sma_slow"]
@@ -182,16 +202,16 @@ def technical_report(ticker: str, period: str = "1y", params: dict | None = None
         "close": _metric(last, meta.currency, "price"),
         f"sma{fast}": _metric(float(sma_f), meta.currency, "sma"),
         f"sma{slow}": _metric(float(sma_s), meta.currency, "sma"),
-        f"price_vs_sma{fast}": _metric(last / sma_f - 1 if pd.notna(sma_f) else None, "%", "sma"),
-        f"price_vs_sma{slow}": _metric(last / sma_s - 1 if pd.notna(sma_s) else None, "%", "sma"),
+        f"price_vs_sma{fast}": _metric(_distance(last, float(sma_f)), "%", "sma"),
+        f"price_vs_sma{slow}": _metric(_distance(last, float(sma_s)), "%", "sma"),
         rsi_key: _metric(float(indicators.rsi(close, p["rsi_period"]).iloc[-1]), "index 0-100", "rsi"),
         "macd": _metric(float(m["macd"]), meta.currency, "macd"),
         "macd_signal": _metric(float(m["signal"]), meta.currency, "macd"),
         "macd_histogram": _metric(float(m["histogram"]), meta.currency, "macd"),
         "bollinger_upper": _metric(float(bands["upper"]), meta.currency, "bollinger"),
         "bollinger_lower": _metric(float(bands["lower"]), meta.currency, "bollinger"),
-        "price_vs_bollinger_upper": _metric(last / float(bands["upper"]) - 1, "%", "bollinger"),
-        "price_vs_bollinger_lower": _metric(last / float(bands["lower"]) - 1, "%", "bollinger"),
+        "price_vs_bollinger_upper": _metric(_distance(last, float(bands["upper"])), "%", "bollinger"),
+        "price_vs_bollinger_lower": _metric(_distance(last, float(bands["lower"])), "%", "bollinger"),
         atr_key: _metric(atr, meta.currency, "atr"),
         f"{atr_key}_pct_of_close": _metric(atr / last, "%", "atr"),
         "high_52w": _metric(high, meta.currency, "price"),
@@ -201,6 +221,17 @@ def technical_report(ticker: str, period: str = "1y", params: dict | None = None
     }
     if pd.isna(sma_s):
         meta.warnings.append(f"fewer than {slow} sessions: sma{slow} unavailable, request a longer period")
+    required = {"sma": slow, "rsi": p["rsi_period"] + 1, "atr": p["atr_period"],
+                "bollinger": p["bollinger_n"], "macd": p["macd_slow"] + p["macd_signal"] - 1}
+    for key, metric in metrics.items():
+        if metric["value"] is None:
+            need = fast if key in {f"sma{fast}", f"price_vs_sma{fast}"} else required.get(metric["ref"], 1)
+            if key == "macd":
+                need = p["macd_slow"]
+            metric["required_observations"] = need
+            if len(prices) < need:
+                metric["reason"] = f"insufficient observations: {len(prices)} prices, need {need}; request a longer period"
+            meta.warnings.append(f"{key}: {metric['reason']}")
     return {
         "ticker": ticker,
         "currency": meta.currency,
@@ -211,6 +242,7 @@ def technical_report(ticker: str, period: str = "1y", params: dict | None = None
         "source": meta.source,
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
+        **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
     }
 
 
@@ -257,6 +289,8 @@ def fundamentals_report(
     equity_risk_premium: float | None = None,
     beta: float | None = None,
 ) -> dict:
+    validate_parameters(CapitalParameters, risk_free_annual=risk_free_annual,
+                        equity_risk_premium=equity_risk_premium, beta=beta)
     profile = data.info(ticker)
     years, fin_ccy, fiscal_end = data.statements(ticker)
     price_ccy = profile.get("currency") or "?"
@@ -264,6 +298,8 @@ def fundamentals_report(
     market_cap = profile.get("marketCap")
     if price is None or market_cap is None:
         raise data.DataError(f"no price or market cap for {ticker!r}")
+    if not all(math.isfinite(float(v)) and float(v) > 0 for v in (price, market_cap)):
+        raise data.DataError(f"price and market cap for {ticker!r} must be finite and positive")
     warnings = []
     price, market_cap, price_ccy = normalise_quote(float(price), float(market_cap), price_ccy)
     if price_ccy != fin_ccy:
@@ -274,11 +310,19 @@ def fundamentals_report(
             "for depositary receipts check the share ratio before trusting per-share ratios"
         )
     values = ratios(years, float(price), float(market_cap))
+    values |= dict.fromkeys(("cost_of_equity", "wacc", "eva", "unlevered_beta"))
+    values["cost_of_debt_pretax"] = interest_rate(years)
     if warning := interest_warning(years):
         warnings.append(warning)
     parameters = {"risk_free_annual": risk_free_annual, "equity_risk_premium": equity_risk_premium, "beta": beta}
+    used_beta = beta if beta is not None else profile.get("beta")
+    if used_beta is not None and not math.isfinite(used_beta):
+        used_beta = None
+    if not years:
+        raise data.DataError(f"no annual statements for {ticker!r}")
+    current = years[0]
+    values["unlevered_beta"] = unlevered_beta(current.total_debt, market_cap, current.tax_rate, used_beta)
     if risk_free_annual is not None and equity_risk_premium is not None:
-        used_beta = beta if beta is not None else profile.get("beta")
         if used_beta is None:
             warnings.append("no beta from Yahoo: pass beta to compute the cost of capital")
         else:
@@ -288,6 +332,10 @@ def fundamentals_report(
     else:
         warnings.append("cost of equity, WACC and EVA need risk_free_annual and equity_risk_premium from the analyst")
     metrics = {k: _metric(v, _unit(k, fin_ccy), "fundamentals", 2 if k in MONEY else 4) for k, v in values.items()}
+    diagnostics = capital_diagnostics(years, market_cap, risk_free_annual, equity_risk_premium, used_beta, values)
+    for key, diagnostic in diagnostics.items():
+        metrics[key].update(diagnostic)
+        warnings.append(f"{key}: {diagnostic['reason']}")
     metrics["yahoo_trailing_pe_ttm"] = _metric(profile.get("trailingPE"), "ratio", "fundamentals")
     metrics["yahoo_dividend_yield"] = _metric(
         (profile.get("dividendYield") or 0) / 100 if profile.get("dividendYield") else None, "%", "fundamentals"
@@ -310,6 +358,7 @@ def fundamentals_report(
         "references": references({m["ref"] for m in metrics.values()}),
         "source": data.SOURCE,
         "warnings": warnings,
+        **data.report_metadata(),
     }
 
 
@@ -320,22 +369,32 @@ def peer_report(tickers: list[str]) -> dict:
     for ticker in tickers:
         try:
             report = fundamentals_report(ticker)
-        except Exception as err:  # one failing ticker must not discard the reports already built
-            errors[ticker] = str(err) if isinstance(err, data.DataError) else f"{type(err).__name__}: {err}"
+        except data.DataError as err:
+            errors[ticker] = str(err)
+            continue
+        except Exception:  # one failing ticker must not discard the reports already built
+            logger.exception("Fundamental analysis failed for %r", ticker)
+            errors[ticker] = "analysis failed; retry or check server logs"
             continue
         refs |= report.pop("references")
         report.pop("scores")
         rows[ticker] = report
-    return {"companies": rows, "errors": errors, "references": refs}
+    return {"companies": rows, "errors": errors, "references": refs, **data.report_metadata()}
 
 
 def etf_report(ticker: str, benchmark: str, period: str = "3y") -> dict:
+    validate_parameters(RiskParameters, period=period)
     profile = data.info(ticker)
     if profile.get("quoteType") != "ETF":
         raise data.DataError(f"{ticker!r} is a {profile.get('quoteType')}, not an ETF")
     fund_prices, meta = data.history(ticker, period)
     bench_prices, bench_meta = data.history(benchmark, period)
     bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period)
+    data.require_prices(fund_prices)
+    data.require_prices(bench_prices)
+    aligned = risk.aligned(fund_prices["Close"], bench_prices["Close"])
+    if len(aligned) < 3:
+        raise data.DataError(f"insufficient observations for aligned ETF/benchmark history: {len(aligned)} prices, need at least 3; request a longer period")
     t = risk.tracking(fund_prices["Close"], bench_prices["Close"])
     ter = profile.get("netExpenseRatio")
     metrics = {
@@ -347,6 +406,10 @@ def etf_report(ticker: str, benchmark: str, period: str = "3y") -> dict:
         "total_assets": _metric(profile.get("totalAssets"), profile.get("currency") or "?", "tracking", 0),
     }
     warnings = meta.warnings + bench_meta.warnings
+    if t["weeks"] < 2:
+        metrics["tracking_error"].update(reason=f"insufficient observations: {int(t['weeks'])} weekly returns, need 2; request a longer period",
+                                          required_observations=2)
+        warnings.append(f"tracking_error: {metrics['tracking_error']['reason']}")
     if utc_offset(meta.timezone) != utc_offset(bench_meta.timezone):
         warnings.append(
             f"fund closes in {meta.timezone}, benchmark in {bench_meta.timezone}: asynchronous closes "
@@ -369,4 +432,5 @@ def etf_report(ticker: str, benchmark: str, period: str = "3y") -> dict:
         "source": meta.source,
         "retrieved_at": meta.retrieved_at,
         "warnings": warnings,
+        **data.report_metadata(len(aligned), int(t["observations"]), meta.retrieved_at),
     }

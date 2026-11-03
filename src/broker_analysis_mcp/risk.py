@@ -42,7 +42,8 @@ def volatility(returns: pd.Series, periods: int = PERIODS) -> float:
 
 def sharpe(returns: pd.Series, rf_annual: float = 0.0, periods: int = PERIODS) -> float:
     excess = returns - daily_rate(rf_annual, periods)
-    return float(excess.mean() / excess.std(ddof=1)) * math.sqrt(periods)
+    deviation = float(excess.std(ddof=1))
+    return float(excess.mean()) / deviation * math.sqrt(periods) if deviation > 0 else math.nan
 
 
 def sharpe_standard_error(sr_annual: float, n: int, periods: int = PERIODS) -> float:
@@ -56,11 +57,17 @@ def probabilistic_sharpe(
 ) -> float:
     """Probability that the true Sharpe ratio exceeds the benchmark one (Bailey & Lopez de Prado)."""
     excess = returns - daily_rate(rf_annual, periods)
-    sr = float(excess.mean() / excess.std(ddof=1))
+    deviation = float(excess.std(ddof=1))
+    if deviation <= 0 or not math.isfinite(deviation):
+        return math.nan
+    sr = float(excess.mean()) / deviation
     sr_star = benchmark_sr_annual / math.sqrt(periods)
     skew = float(stats.skew(excess))
     kurt = float(stats.kurtosis(excess, fisher=False))
-    denominator = math.sqrt(1 - skew * sr + (kurt - 1) / 4 * sr**2)
+    variance = 1 - skew * sr + (kurt - 1) / 4 * sr**2
+    if variance <= 0:
+        return math.nan
+    denominator = math.sqrt(variance)
     z = (sr - sr_star) * math.sqrt(len(excess) - 1) / denominator
     return float(stats.norm.cdf(z))
 

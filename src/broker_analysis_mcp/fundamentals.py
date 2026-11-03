@@ -7,6 +7,7 @@ first. A ratio whose inputs are missing, or whose denominator is not positive, i
 a number nobody can interpret.
 """
 
+import math
 from dataclasses import dataclass
 
 DAYS = 365
@@ -189,6 +190,13 @@ def ratios(years: list[Year], price: float, market_cap: float) -> dict[str, floa
     }
 
 
+def unlevered_beta(debt: float | None, market_cap: float, tax_rate: float | None, beta: float | None) -> float | None:
+    if tax_rate is None or beta is None or market_cap <= 0:
+        return None
+    denominator = 1 + (1 - tax_rate) * (debt or 0) / market_cap
+    return beta / denominator if denominator != 0 else None
+
+
 def cost_of_capital(years: list[Year], market_cap: float, inputs: CapitalInputs) -> dict[str, float | None]:
     """CAPM cost of equity, WACC with market-value equity and book debt, EVA and Hamada beta.
 
@@ -207,11 +215,46 @@ def cost_of_capital(years: list[Year], market_cap: float, inputs: CapitalInputs)
         wacc = market_cap / value * ke + debt / value * kd * (1 - t)
     nopat = None if c.ebit is None or t is None else c.ebit * (1 - t)
     eva = None if nopat is None or wacc is None or c.invested_capital is None else nopat - wacc * c.invested_capital
-    unlevered = None if t is None or market_cap <= 0 else inputs.beta / (1 + (1 - t) * debt / market_cap)
     return {
         "cost_of_equity": ke,
         "cost_of_debt_pretax": kd,
         "wacc": wacc,
         "eva": eva,
-        "unlevered_beta": unlevered,
+        "unlevered_beta": unlevered_beta(c.total_debt, market_cap, t, inputs.beta),
     }
+
+
+def capital_diagnostics(years: list[Year], market_cap: float, risk_free: float | None,
+                        equity_risk_premium: float | None, beta: float | None, values: dict) -> dict:
+    """Explain only dependencies used by each capital formula, including the debt-free branch."""
+    c, p = year(years, 0), year(years, 1)
+    inputs = {"risk_free_annual": risk_free, "equity_risk_premium": equity_risk_premium, "beta": beta,
+              "interest_expense": c.interest_expense, "total_debt": c.total_debt, "tax_rate": c.tax_rate,
+              "ebit": c.ebit, "invested_capital": c.invested_capital, "market_cap": market_cap}
+    equity = ["risk_free_annual", "equity_risk_premium", "beta"]
+    debt = ["interest_expense", "total_debt"]
+    weighted = [*equity, *debt, "tax_rate"] if (c.total_debt or 0) > 0 else equity
+    dependencies = {"cost_of_equity": equity, "cost_of_debt_pretax": debt, "wacc": weighted,
+                    "eva": [*weighted, "ebit", "tax_rate", "invested_capital"],
+                    "unlevered_beta": ["beta", "tax_rate", "market_cap"]}
+    out = {}
+    for name, required in dependencies.items():
+        value = values[name]
+        if value is not None and math.isfinite(value):
+            continue
+        missing = list(dict.fromkeys(key for key in required if inputs[key] is None))
+        invalid = list(dict.fromkeys(key for key in required if inputs[key] is not None and not math.isfinite(inputs[key])))
+        if name == "unlevered_beta" and c.tax_rate is not None and 1 + (1 - c.tax_rate) * (c.total_debt or 0) / market_cap == 0:
+            invalid.append("unlevered_beta denominator (must be nonzero)")
+        if name in {"cost_of_debt_pretax", "wacc", "eva"} and (name == "cost_of_debt_pretax" or (c.total_debt or 0) > 0):
+            average_debt = avg(c.total_debt, p.total_debt)
+            if average_debt is not None and average_debt <= 0:
+                invalid.append("average_total_debt (must be positive)")
+        details = []
+        if missing:
+            details.append(f"missing inputs: {', '.join(missing)}")
+        if invalid:
+            details.append(f"invalid inputs: {', '.join(invalid)}")
+        out[name] = {"reason": "; ".join(details) or "calculation is not finite for the reported inputs",
+                     "missing_inputs": missing, "invalid_inputs": invalid}
+    return out

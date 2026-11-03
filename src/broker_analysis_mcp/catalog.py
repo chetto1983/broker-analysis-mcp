@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from . import indicators as ind
+from .errors import SpecError
 
 Series = pd.Series
 Namespace = dict[str, Series]
@@ -138,10 +139,6 @@ CATALOG: dict[str, Indicator] = {
 }
 
 
-class SpecError(ValueError):
-    """An indicator, expression or condition the user supplied is not valid."""
-
-
 def resolve_params(name: str, given: dict, defaults: dict | None = None) -> dict:
     """Merges user parameters over the defaults, checking names, types and bounds. `defaults`
     replaces a catalog default for this instrument (periods per year for a crypto asset)."""
@@ -154,6 +151,8 @@ def resolve_params(name: str, given: dict, defaults: dict | None = None) -> dict
         raw = given.get(key, (defaults or {}).get(key, param.default))
         try:
             value = param.kind(raw) if param.kind is not int else int(float(raw))
+            if param.kind is int and (isinstance(raw, bool) or float(raw) != value):
+                raise ValueError("not an integer")
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError("not finite")
         except (TypeError, ValueError, OverflowError) as err:
@@ -161,6 +160,8 @@ def resolve_params(name: str, given: dict, defaults: dict | None = None) -> dict
         if (param.low is not None and value < param.low) or (param.high is not None and value > param.high):
             raise SpecError(f"{name}.{key}={value} outside [{param.low}, {param.high}]")
         out[key] = value
+    if name == "macd" and out["fast"] >= out["slow"]:
+        raise SpecError("macd.fast must be less than macd.slow")
     return out
 
 

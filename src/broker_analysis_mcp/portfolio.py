@@ -194,6 +194,7 @@ def report(
                             for b in tickers} for a in tickers},
         "stress_scenarios": stress, "model_status": status, "warnings": warnings,
         "sources": metadata,
+        **data.report_metadata(len(dates), n),
         "references": {"fhs_es": "Joint historical return vectors scaled by current/past portfolio sigma; empirical upper-tail loss mean with fractional boundary mass.",
                        "historical": "Unscaled empirical losses on the same FHS sample; inverse empirical CDF VaR.",
                        "variance": "Causal zero-mean second moment; see development report.",
