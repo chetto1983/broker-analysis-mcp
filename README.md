@@ -58,8 +58,11 @@ uses the completed-only live default. Reports name the aware daily `last_bar_tim
 trade time and scheduled session end. Equity completion uses provider session boundaries;
 crypto waits for the next UTC midnight. Live alert hooks explicitly retain incomplete-session
 evaluation. Current fundamental quotes and financial statements keep their existing behavior.
-When the provider supplies only an unmatched next-session schedule, the latest bar is excluded
-as uncertain; this conservative choice can lag by one observed row.
+When current metadata names another session, acquisition requests yfinance's existing historical
+regular-session schedule and matches its dated start/end to the bar. The captured session end
+belongs to the selected bar, or is null without matching evidence. If the historical schedule
+is also unavailable, the latest bar remains uncertain and can be excluded conservatively.
+Previously stored snapshots retain their original metadata; acquire a new one for new evidence.
 For comparisons, `comparison_window` names the common calendar and `session_sources` preserves
 each asset/benchmark/FX bar's evidence. The aggregate `last_bar_complete` includes all series
 used by the calculation; a closed fund does not hide an incomplete benchmark or FX bar.
@@ -94,6 +97,11 @@ repeated calls add fresh timestamped records, so it is not idempotent. Its Yahoo
 open-world interaction. `custom_analysis` declares local writes because its default chart
 option saves PNG/JSON files. Hook tools retain their file/webhook effects. No trading operations
 are provided.
+
+With `custom_analysis(chart=false)`, indicator/series computation has no chart-pane limit and
+does not write chart files. The four-lower-pane limit applies when a chart is requested.
+If a configured lookback exceeds the finite history of its source series, the report warns
+with the series ID, lookback and available observation count; the unavailable value stays null.
 
 ### Portfolio risk and model records
 
