@@ -149,6 +149,30 @@ def test_replay_rejects_session_end_without_matching_captured_evidence(market):
         snapshots.load(audit.put(raw))
 
 
+def test_replay_rejects_schedule_on_another_exchange_local_date(market):
+    from broker_analysis_mcp import snapshots
+
+    raw = audit.read(acquire()["snapshot_id"])
+    value = raw["histories"]["AAPL"]
+    row = {"date": "2026-11-02", "start": "2026-11-02T00:00+14:00", "end": "2026-11-02T01:00+14:00"}
+    value["provider_metadata"]["tradingPeriods"] = [row]
+    value["meta"]["session_end_timestamp"] = row["end"]
+    with pytest.raises(data.DataError, match=r"schedule|session"):
+        snapshots.load(audit.put(raw))
+
+
+def test_replay_rejects_unclosed_schedule_evidence_for_a_nonfinal_retained_bar(market):
+    from broker_analysis_mcp import snapshots
+
+    raw = audit.read(acquire()["snapshot_id"])
+    value = raw["histories"]["AAPL"]
+    assert value["source_timestamps"][-2].startswith("2026-10-30")
+    value["provider_metadata"]["tradingPeriods"] = [
+        {"date": "2026-10-30", "start": "2026-10-30T18:00-04:00", "end": "2026-11-03T17:00-05:00"}]
+    with pytest.raises(data.DataError, match=r"schedule|session"):
+        snapshots.load(audit.put(raw))
+
+
 def test_snapshot_replay_is_shared_by_all_five_reports_and_frozen(market, monkeypatch):
     result = acquire(tickers=["AAPL", "ENI.MI", "SPY"], benchmark="SPY", base_currency="EUR")
     snapshot_id = result["snapshot_id"]

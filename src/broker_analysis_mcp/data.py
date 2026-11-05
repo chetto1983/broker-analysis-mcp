@@ -110,6 +110,18 @@ def _session_labels(prices: pd.DataFrame, metadata: dict) -> pd.DatetimeIndex:
     return labels
 
 
+def _schedule_day(start: pd.Timestamp, end: pd.Timestamp, timezone: str) -> str | None:
+    if not isinstance(timezone, str) or not timezone:
+        raise DataError("session schedule requires an exchange timezone")
+    try:
+        local_start, local_end = start.tz_convert(timezone), end.tz_convert(timezone)
+    except (KeyError, TypeError, ValueError):
+        raise DataError("invalid exchange timezone for session schedule") from None
+    # yfinance derives its schedule index from the start date. It cannot establish
+    # which daily label belongs to a session crossing local midnight.
+    return local_start.date().isoformat() if local_start.date() == local_end.date() else None
+
+
 def regular_schedule(metadata: dict) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
     """Validate the minimal dated evidence captured from yfinance's public schedule."""
     schedule = metadata.get("tradingPeriods", [])
@@ -122,7 +134,7 @@ def regular_schedule(metadata: dict) -> dict[str, tuple[pd.Timestamp, pd.Timesta
         start, end = _aware(row["start"]), _aware(row["end"])
         day = row["date"]
         if (not isinstance(day, str) or start is None or end is None or start >= end
-                or day != start.date().isoformat() or day in out):
+                or day != _schedule_day(start, end, metadata.get("exchangeTimezoneName")) or day in out):
             raise DataError("invalid captured session schedule date/boundary")
         out[day] = (start, end)
     return out
@@ -136,7 +148,7 @@ def session_bounds(label: pd.Timestamp, metadata: dict, schedule=None) -> tuple[
     regular = period.get("regular") or {}
     start, end = _aware(regular.get("start")), _aware(regular.get("end"))
     # An overnight session's start date can also label the preceding closed bar.
-    # A dated schedule is authoritative; current-period fallback uses its closing date.
+    # Same-local-day dated evidence wins; current-period fallback uses its closing date.
     if start is not None and end is not None and start < end and label.date() == end.tz_convert(label.tz).date():
         return start, end
     return None, None
@@ -154,7 +166,8 @@ def _capture_schedule(raw_metadata, metadata: dict, labels: pd.DatetimeIndex, ob
     if isinstance(schedule, pd.DataFrame) and {"start", "end"} <= set(schedule.columns):
         for label, row in schedule.iterrows():
             start, end = _aware(row["start"]), _aware(row["end"])
-            if start is not None and end is not None:
+            if (start is not None and end is not None
+                    and _schedule_day(start, end, metadata.get("exchangeTimezoneName")) is not None):
                 rows.append({"date": label.date().isoformat(), "start": start.isoformat(), "end": end.isoformat()})
     metadata["tradingPeriods"] = rows
     regular_schedule(metadata)

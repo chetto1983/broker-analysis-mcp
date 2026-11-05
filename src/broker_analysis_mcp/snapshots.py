@@ -42,28 +42,44 @@ def _check_session_time(meta: data.Meta, labels: list, provider: dict) -> None:
     last = data._aware(labels[-1])
     if observed > data._aware(meta.retrieved_at):
         raise ValueError("observation occurs after retrieval")
-    data.regular_schedule(provider)
+    schedule = data.regular_schedule(provider)
+    period = provider.get("currentTradingPeriod")
+    if period is None:
+        period = {}
+    if not isinstance(period, dict):
+        raise ValueError("invalid provider trading-period shape")
+    regular = period.get("regular")
+    if regular is None:
+        regular = {}
+    if not isinstance(regular, dict):
+        raise ValueError("invalid provider regular-session shape")
     expected = None
-    if provider.get("instrumentType") == "CRYPTOCURRENCY":
-        expected = observed >= last.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+    crypto = provider.get("instrumentType") == "CRYPTOCURRENCY"
+    if crypto:
+        end = last.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+        expected = observed >= end
     else:
-        period = provider.get("currentTradingPeriod")
-        if period is None:
-            period = {}
-        if not isinstance(period, dict):
-            raise ValueError("invalid provider trading-period shape")
-        regular = period.get("regular")
-        if regular is None:
-            regular = {}
-        if not isinstance(regular, dict):
-            raise ValueError("invalid provider regular-session shape")
-        start, end = data.session_bounds(last, provider)
+        start, end = data.session_bounds(last, provider, schedule)
         if start is not None:
             if observed < start:
                 raise ValueError("future regular session")
             expected = observed >= end
-        if "tradingPeriods" in provider and ((end is None and meta.session_end_timestamp is not None)
-                                            or data._aware(meta.session_end_timestamp) != end):
+    if "tradingPeriods" in provider:
+        if provider.get("exchangeTimezoneName") != meta.timezone:
+            raise ValueError("session schedule timezone differs from source metadata")
+        for label in labels:
+            stamp = data._aware(label)
+            if stamp.tz_convert(meta.timezone).tz_localize(None) != stamp.tz_localize(None):
+                raise ValueError("source label contradicts exchange-local session timezone")
+            start, boundary = data.session_bounds(stamp, provider, schedule)
+            if crypto:
+                boundary = stamp.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+            if start is not None and observed < start:
+                raise ValueError("retained future regular session")
+            if boundary is not None and not meta.include_incomplete_session and observed < boundary:
+                raise ValueError("retained incomplete session contradicts completed-only policy")
+        if ((end is None and meta.session_end_timestamp is not None)
+                or data._aware(meta.session_end_timestamp) != end):
             raise ValueError("session end contradicts captured dated schedule")
     if expected is not None and meta.last_bar_complete is not expected:
         raise ValueError("completion contradicts captured session/observation times")

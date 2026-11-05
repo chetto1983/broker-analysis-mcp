@@ -62,6 +62,8 @@ When current metadata names another session, acquisition requests yfinance's exi
 regular-session schedule and matches its dated start/end to the bar. The captured session end
 belongs to the selected bar, or is null without matching evidence. If the historical schedule
 is also unavailable, the latest bar remains uncertain and can be excluded conservatively.
+Historical rows crossing exchange-local midnight do not prove the daily-bar association and
+remain ambiguous; their start-derived index is not used as a bar identifier.
 Previously stored snapshots retain their original metadata; acquire a new one for new evidence.
 For comparisons, `comparison_window` names the common calendar and `session_sources` preserves
 each asset/benchmark/FX bar's evidence. The aggregate `last_bar_complete` includes all series

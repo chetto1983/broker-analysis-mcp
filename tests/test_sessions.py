@@ -109,6 +109,18 @@ def test_unmatched_bar_does_not_borrow_another_session_end(monkeypatch):
     assert meta.session_end_timestamp is None
 
 
+def test_start_indexed_overnight_schedule_does_not_assign_next_days_close(monkeypatch):
+    prices = frame("2026-11-04")
+    dates = pd.date_range("2026-11-03", "2026-11-04", tz="America/New_York")
+    schedule = pd.DataFrame({"start": dates + pd.Timedelta(hours=18),
+                             "end": dates + pd.Timedelta(days=1, hours=17)}, index=dates)
+    provider(monkeypatch, prices, "2026-11-04T18:00-05:00", "2026-11-05T17:00-05:00", schedule=schedule)
+    selected, meta = data.history("A", observed_at=datetime.fromisoformat("2026-11-05T08:00Z"))
+    assert str(selected.index[-1].date()) == "2026-11-03"
+    assert meta.session_end_timestamp is None
+    assert meta.excluded_candidates[-1]["complete"] is None
+
+
 def test_same_completed_frame_reaches_every_report(monkeypatch, tmp_path):
     provider(monkeypatch, frame(), "2026-11-03T09:30-05:00", "2026-11-03T16:00-05:00")
     original = data.history

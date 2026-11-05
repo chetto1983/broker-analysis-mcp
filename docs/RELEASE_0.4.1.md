@@ -6,6 +6,9 @@ where November 4 was dropped because current metadata named November 5. The matc
 end is frozen with the OHLCV; an unrelated day's close is no longer attached to the selected
 bar. Missing schedule evidence retains explicit uncertainty. Crypto still closes at UTC
 midnight, and a future bar is never admitted.
+Historical rows crossing exchange-local midnight cannot establish the daily-bar association;
+acquisition omits that ambiguous evidence. Replay validates dates in the exchange timezone
+and checks applicable completion evidence for every retained bar, not only the final one.
 
 Old snapshots remain immutable and preserve their original values and metadata. Acquire a
 new snapshot to use the new evidence. Replay validates captured schedules and remains fully
@@ -26,5 +29,6 @@ prototype using unofficial Yahoo Finance data.
 The live 0.4.0 VM reproduced every reported defect before changes. The public historical
 schedule supplied the missing November 4 boundary in one cached 0.124-second sample.
 Regressions were watched failing before their fixes; the final pre-release offline suite
-has 336 passing tests with 26 live tests excluded, and Ruff/diff checks pass. Release CI,
+has 339 passing tests with 26 live tests excluded; Ruff/diff checks and offline wheel/sdist
+build pass. Three Important review findings have failing-then-passing regressions. Release CI,
 installed-package and real-agent acceptance are recorded separately after they complete.
