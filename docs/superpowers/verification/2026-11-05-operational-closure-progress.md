@@ -61,3 +61,35 @@ custom expressions returning Infinity; empty event studies now explain null stat
 Native MCP -m startup must use absolute top-level imports because AnyIO re-executes the
 parent entry module in its worker initialization; the actual -m portfolio-record test
 exposed this and passed after the entrypoint fix.
+
+Fresh final review (read-only, b409804, gpt-6-astra): R1 Important, application SpecError
+messages echoed rejected values/operator allowlists; R2 Important, custom latest values
+silently selected an older finite observation; R3 Minor, nested-source warmup misclassified.
+Ruling: regrade R3 Important because wrong null taxonomy suggests the wrong remediation;
+fix it in the same single RED/GREEN pass. Dedicated regressions observed R1 (3/4 cases),
+R2 and R3 fail before changes. Safe public SpecError messages/constraint details, final-bar
+evaluation and shared finite-source warmup evidence address them.
+
+Final: Ruling on declined chart collisions: concurrent analyses must preserve returned
+artifacts even though generated charts are outside record backup. Regraded Important;
+two different same-second real charts reproduced overwrite (RED). Unique artifact names
+fix it within this pass. Process-death-before-hook-publication coverage was also added.
+
+Other declined dimensions stand as documented: direct-process static launch configuration,
+filesystem/power-loss and hostile local writers, at-least-once external delivery, additional
+complete objects after interrupted restore, mutable state backed up while stopped, and
+bounded local capacity rather than an uptime SLA. Package pins/CI/installation follow.
+
+Windows-native source: 23 operational/archive/storage tests pass in 120.88 s after using
+a fresh explicit --basetemp (the preexisting global pytest temp root denied access).
+Windows wheel acceptance: 100 live-snapshot replays, concurrency 4, errors 0 and full
+backup/restore/restart pass; first uv install included in startup 11.566 s. Linux fixture
+soak: 1000 replays, concurrency 8, errors 0, median 0.268 s, p95 0.510 s, max 3.383 s,
+zero provider operations and restore/restart pass. These precede the review fix pass.
+
+Single review fix pass complete: all Important findings have RED/GREEN regressions;
+full final source suite 383 passed, 26 live deselected in 191.54 s. Ruff/diff and locked
+resolution pass. Offline wheel/sdist rebuilt. Windows changed-path acceptance is 16/16
+passing in 58.40 s, including private-input/configuration redaction and latest-bar nulls.
+No second independent review is claimed. Remaining publication/installation/CI steps
+are deliberately separate from source acceptance.

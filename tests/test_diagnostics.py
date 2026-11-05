@@ -73,3 +73,21 @@ def test_event_study_empty_sample_explains_null_statistics(monkeypatch):
     horizon = result["conditions"][0]["forward_returns"]["5d"]
     assert horizon["after_events"]["reason_code"] == "insufficient_history"
     assert horizon["difference_t_stat_diagnostic"]["reason_code"] == "insufficient_history"
+
+
+def test_latest_nonfinite_custom_value_never_uses_a_previous_bar(monkeypatch):
+    frame = prices(4)
+    frame.iloc[-1] = frame.iloc[-2]
+    monkeypatch.setattr(data, "history", lambda ticker, *args: (frame, data.Meta(ticker, "USD")))
+    result, _ = workbench.run("A", "1y", [], [SeriesSpec(id="inverse", expr="1 / (close - prev(close))")], [], [], False)
+    assert result["series_last_values"]["inverse"] is None
+    assert result["series_diagnostics"]["inverse"]["reason_code"] == "undefined"
+
+
+def test_nested_indicator_counts_finite_source_observations(monkeypatch):
+    monkeypatch.setattr(data, "history", lambda ticker, *args: (prices(4), data.Meta(ticker, "USD")))
+    result, _ = workbench.run("A", "1y", [IndicatorSpec(id="first", fn="sma", params={"n": 3}),
+                                            IndicatorSpec(id="nested", fn="sma", params={"source": "first", "n": 3})],
+                              [], [], [], False)
+    assert result["series_diagnostics"]["nested"]["reason_code"] == "insufficient_history"
+    assert result["series_diagnostics"]["nested"]["available_observations"] == 2

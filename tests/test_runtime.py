@@ -144,3 +144,30 @@ def test_provider_faults_have_safe_retry_information(tmp_path, ticker, code):
             assert "private" not in result.content[0].text
             assert not list((tmp_path / "home" / "records").glob("*.json"))
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("case", ["parameter", "indicator", "expression", "webhook"])
+def test_application_errors_hide_rejected_values_and_operator_configuration(tmp_path, case):
+    secret = "SECRET_REJECTED_VALUE"
+    async def exercise():
+        params = parameters(tmp_path)
+        params.env["BROKER_ANALYSIS_WEBHOOK_ALLOW"] = "https://OPERATOR_PRIVATE_ALLOWLIST.invalid/private"
+        async with stdio_client(params) as (r, w), ClientSession(r, w) as client:
+            await client.initialize()
+            name, arguments = "custom_analysis", {"ticker": "A", "chart": False}
+            if case == "parameter":
+                arguments["indicators"] = [{"id": "x", "fn": "sma", "params": {"n": secret}}]
+            elif case == "indicator":
+                arguments["indicators"] = [{"id": "x", "fn": secret}]
+            elif case == "expression":
+                arguments["series"] = [{"id": "x", "expr": f"{secret} + close"}]
+            else:
+                name = "create_hook"
+                arguments = {"ticker": "A", "name": "denied", "condition": {"name": "positive", "when": "close > 0"},
+                             "action": {"type": "webhook", "target": "https://denied.invalid/hook"}}
+            result = await client.call_tool(name, arguments)
+            assert result.is_error
+            assert payload(result)["error"]["code"] == "INVALID_INPUT"
+            assert secret not in result.content[0].text
+            assert "OPERATOR_PRIVATE_ALLOWLIST" not in result.content[0].text
+    asyncio.run(exercise())

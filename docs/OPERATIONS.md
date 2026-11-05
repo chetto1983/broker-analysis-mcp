@@ -79,7 +79,8 @@ not authenticated against an attacker who can replace it and its separately held
 Files are fsynced before publication; POSIX directory entries are fsynced too. Windows
 directory fsync is unavailable through this interface. Test power-loss recovery on the
 actual filesystem before promising it. Interrupted workers may leave `.pending-*` files;
-`verify` reports their count. They are never treated as committed records. Remove only
+`verify` counts these under `records/`. Interrupted hook writes can leave them at the state
+root. They are never treated as committed records. Remove only
 operator-confirmed stale pending files with the server stopped. No automatic record
 retention/deletion is enabled; monitor volume usage and provision space for archives.
 

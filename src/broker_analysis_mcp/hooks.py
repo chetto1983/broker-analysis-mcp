@@ -93,7 +93,8 @@ def check_action(action: HookAction) -> None:
     if not allowed:
         raise SpecError("webhooks are disabled: the operator must set BROKER_ANALYSIS_WEBHOOK_ALLOW")
     if not any(_within(action.target, p) for p in allowed):
-        raise SpecError(f"webhook target not in the allowed prefixes {allowed}")
+        raise SpecError("webhook target not in the allowed prefixes", public_message="webhook destination is not permitted by the operator",
+                        field="action.target")
 
 
 def _evaluate(hook: dict, loader: Loader) -> tuple[pd.DataFrame, dict, pd.Series, data.Meta]:

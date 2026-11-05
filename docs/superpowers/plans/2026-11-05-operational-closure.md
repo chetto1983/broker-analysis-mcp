@@ -40,7 +40,7 @@ CallToolResult plus telemetry. `error_payload(error)` returns a sanitized error 
   hard timeout, cancellation, worker recovery, concurrency and request metadata.
 - [x] Implement dispatch with AnyIO fail_after/to_process.run_sync(cancellable=True),
   bounded capacity, native SDK validation and per-request telemetry.
-- [ ] Run the focused tests and existing contract/snapshot tests; commit.
+- [x] Run the focused tests and existing contract/snapshot tests; commit.
 
 ### Task 2: Provider failures and precise nulls
 
@@ -54,7 +54,7 @@ metric diagnostics add reason_code, reason, missing_inputs/invalid_inputs when n
   frames and finite FX; null ratios, flat risk, short samples and missing ETF profile.
 - [x] Reuse native yfinance retries, explicit history timeout and exception controls;
   instrument provider calls, sanitize errors, implement field-specific diagnostics.
-- [ ] Run provider/diagnostic and existing numerical/report tests; commit.
+- [x] Run provider/diagnostic and existing numerical/report tests; commit.
 
 ### Task 3: Archive recovery and concurrent hook safety
 
@@ -68,7 +68,7 @@ backup/restore uses verified content-addressed records and merge-only publicatio
   conflicting existing records, disk-full and interrupted atomic publication.
 - [x] Add fsync for published directory entries, sanitized write failures, read-only
   verification, atomic ZIP publication, prevalidated restore and filelock hook updates.
-- [ ] Run archive/storage/hooks and portfolio/snapshot regressions; commit.
+- [x] Run archive/storage/hooks and portfolio/snapshot regressions; commit.
 
 ### Task 4: Operational acceptance and skills
 
@@ -79,7 +79,7 @@ modify current plugin skills/descriptions, CI and packaging metadata.
   handling while removing the obsolete label. Check behavior with the revised skill.
 - [x] Add a repeatable standalone fault/load/restart/restore acceptance using MCP SDK.
   Record measured limits and operating/backup procedures, including mutable hook state.
-- [ ] Run full offline suite, Ruff and package build; obtain one fresh code review;
+- [x] Run full offline suite, Ruff and package build; obtain one fresh code review;
   fix Important/Critical findings with RED/GREEN tests; commit.
 
 ### Task 5: Install, live verification and release

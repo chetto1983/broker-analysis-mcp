@@ -84,13 +84,36 @@ def chart_groups(plots: list[dict]) -> list[str]:
 def warmup_warnings(ns: dict[str, pd.Series], plots: list[dict]) -> list[str]:
     warnings = []
     for plot in plots:
-        lookback = plot["params"].get("n")
-        source = plot["params"].get("source", "close")
-        available = int(np.isfinite(ns[source]).sum())
-        if lookback is not None and available < lookback:
-            warnings.append(f"{plot['id']}: insufficient observations: configured lookback {lookback} "
-                            f"exceeds {available} finite {source} observations; request a longer period")
+        state = warmup_state(ns, plot)
+        if state["available_observations"] < state["required_observations"]:
+            warnings.append(f"{plot['id']}: insufficient observations: configured lookback needs {state['required_observations']} "
+                            f"but only {state['available_observations']} finite {state['source']} observations are available; request a longer period")
     return warnings
+
+
+def warmup_state(ns: dict[str, pd.Series], plot: dict) -> dict:
+    params = plot["params"]
+    source, required = params.get("source", "close"), params.get("n", 1)
+    if plot["fn"] in {"rsi", "roc", "momentum", "volatility"}:
+        required += 1
+    elif plot["fn"] == "macd":
+        required = params["slow"] + (0 if plot["id"].endswith(".macd") else params["signal"] - 1)
+    elif plot["fn"] == "stochastic" and plot["id"].endswith(".d"):
+        required += params["d"] - 1
+    return {"source": source, "available_observations": int(np.isfinite(ns[source]).sum()), "required_observations": required}
+
+
+def series_diagnostics(ns: dict[str, pd.Series], plots: list[dict], values: dict) -> dict:
+    diagnostics = {}
+    for plot in plots:
+        if values[plot["id"]] is None:
+            state = warmup_state(ns, plot)
+            short = state["available_observations"] < state["required_observations"]
+            diagnostic = unavailable("insufficient_history" if short else "undefined",
+                                     f"{plot['id']} requires {state['required_observations']} finite {state['source']} observations; request a longer period" if short
+                                     else f"{plot['id']} is non-finite on the last observed bar; check input series and zero denominators")
+            diagnostics[plot["id"]] = {**diagnostic, **state}
+    return diagnostics
 
 
 def condition_series(spec: ConditionSpec, ns: dict[str, pd.Series]) -> tuple[pd.Series, pd.Series]:
@@ -166,8 +189,8 @@ def condition_report(spec: ConditionSpec, ns: dict[str, pd.Series]) -> tuple[dic
 def last_values(ns: dict[str, pd.Series], plots: list[dict]) -> dict:
     out = {}
     for p in plots:
-        s = ns[p["id"]].replace([np.inf, -np.inf], np.nan).dropna()
-        out[p["id"]] = None if s.empty else round(float(s.iloc[-1]), 4)
+        s = ns[p["id"]]
+        out[p["id"]] = None if s.empty or not math.isfinite(s.iloc[-1]) else round(float(s.iloc[-1]), 4)
     return out
 
 

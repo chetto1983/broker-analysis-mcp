@@ -20,8 +20,9 @@ class DataError(Failure):
 class SpecError(Failure):
     """An indicator, expression or condition the user supplied is not valid."""
 
-    def __init__(self, message, **kwargs):
+    def __init__(self, message, *, public_message=None, **kwargs):
         super().__init__(message, **({"code": "INVALID_INPUT"} | kwargs))
+        self.public_message = public_message or "invalid analysis specification; check the indicator catalog and allowed expression syntax"
 
 
 def validation_issues(error: ValidationError) -> list[dict]:
@@ -52,7 +53,8 @@ def error_payload(error: Exception) -> dict:
             failure = current
         current = current.__cause__
     if failure is not None:
-        return {"code": failure.code, "field": failure.field, "message": str(failure),
+        return {"code": failure.code, "field": failure.field,
+                "message": failure.public_message if isinstance(failure, SpecError) else str(failure),
                 "retryable": failure.retryable, "details": failure.details}
     if isinstance(error, ToolError) and not isinstance(error, UnexpectedToolError):
         return {"code": "INVALID_INPUT", "field": None, "message": "tool or arguments are not supported",

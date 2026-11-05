@@ -3,10 +3,10 @@
 import json
 import re
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from . import custom, data, expr, snapshots
 from .catalog import describe
-from .diagnostics import unavailable
 from .hooks import home
 from .models import ConditionSpec, HistoryParameters, IndicatorSpec, LevelSpec, SeriesSpec, validate_parameters
 
@@ -67,21 +67,13 @@ def run(
         **data.session_metadata(meta),
         "snapshot_id": snapshot_id,
     }
-    result["series_diagnostics"] = {}
-    for plot in plots:
-        if result["series_last_values"][plot["id"]] is None:
-            lookback = plot["params"].get("n")
-            short = isinstance(lookback, (int, float)) and lookback > len(prices)
-            result["series_diagnostics"][plot["id"]] = unavailable(
-                "insufficient_history" if short else "undefined",
-                f"{plot['id']}: {len(prices)} source bars cannot satisfy lookback {lookback}; request a longer period" if short
-                else f"{plot['id']} has no finite result for the configured indicator/expression; check its input series and denominators")
+    result["series_diagnostics"] = custom.series_diagnostics(ns, plots, result["series_last_values"])
     png = None
     if chart:
         from . import charts
 
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-        base = chart_dir() / f"{re.sub(r'[^A-Za-z0-9]+', '_', ticker)}_{stamp}"
+        base = chart_dir() / f"{re.sub(r'[^A-Za-z0-9]+', '_', ticker)}_{stamp}_{uuid4().hex}"
         png = charts.render(
             str(base.with_suffix(".png")), title or f"{ticker} · {result['window']['start']} → {result['window']['end']}",
             prices, ns, plots, marked, levels, meta.currency,

@@ -145,7 +145,9 @@ def resolve_params(name: str, given: dict, defaults: dict | None = None) -> dict
     spec = CATALOG[name]
     unknown = set(given) - set(spec.params)
     if unknown:
-        raise SpecError(f"{name}: unknown parameters {sorted(unknown)}; allowed {sorted(spec.params)}")
+        raise SpecError(f"{name}: unknown parameters {sorted(unknown)}; allowed {sorted(spec.params)}",
+                        public_message=f"{name}: unsupported parameter names; use the indicator catalog", field="params",
+                        details=[{"allowed_fields": sorted(spec.params)}])
     out = {}
     for key, param in spec.params.items():
         raw = given.get(key, (defaults or {}).get(key, param.default))
@@ -156,12 +158,17 @@ def resolve_params(name: str, given: dict, defaults: dict | None = None) -> dict
             if isinstance(value, float) and not math.isfinite(value):
                 raise ValueError("not finite")
         except (TypeError, ValueError, OverflowError) as err:
-            raise SpecError(f"{name}.{key}: expected {param.kind.__name__}, got {raw!r}") from err
+            raise SpecError(f"{name}.{key}: expected {param.kind.__name__}, got {raw!r}",
+                            public_message=f"{name}.{key}: expected a finite {param.kind.__name__}", field=f"params.{key}",
+                            details=[{"constraints": {"type": param.kind.__name__, "ge": param.low, "le": param.high}}]) from err
         if (param.low is not None and value < param.low) or (param.high is not None and value > param.high):
-            raise SpecError(f"{name}.{key}={value} outside [{param.low}, {param.high}]")
+            raise SpecError(f"{name}.{key}={value} outside [{param.low}, {param.high}]",
+                            public_message=f"{name}.{key} is outside the catalog bounds", field=f"params.{key}",
+                            details=[{"constraints": {"ge": param.low, "le": param.high}}])
         out[key] = value
     if name == "macd" and out["fast"] >= out["slow"]:
-        raise SpecError("macd.fast must be less than macd.slow")
+        raise SpecError("macd.fast must be less than macd.slow", public_message="macd.fast must be less than macd.slow",
+                        field="params.fast", details=[{"constraints": {"less_than_field": "slow"}}])
     return out
 
 
