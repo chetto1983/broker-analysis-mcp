@@ -55,7 +55,11 @@ def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: s
         converted[col] = converted[col] * fx
     meta.warnings.append(f"{meta.ticker} converted from {meta.currency} to {currency} with daily FX closes")
     converted.attrs["fx_source"] = fx_source
-    return converted.dropna(subset=["Close"])
+    selected = converted.dropna(subset=["Close"])
+    labels = prices.attrs.get("source_timestamps", [])
+    if len(labels) == len(prices):
+        selected.attrs["source_timestamps"] = [labels[index] for index in prices.index.get_indexer(selected.index)]
+    return selected
 
 
 def _comparison_sessions(prices, meta, benchmark_prices, benchmark_meta, aligned_date):

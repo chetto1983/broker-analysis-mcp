@@ -1,19 +1,59 @@
 """Immutable full-OHLCV datasets in the existing verified audit object store."""
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import UTC, datetime
+from typing import Literal
 
 import pandas as pd
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
 
 from . import audit, data
 from .errors import DataError
-from .models import HistoryParameters, SnapshotParameters, validate_parameters
+from .models import Finite, HistoryParameters, SnapshotParameters, validate_parameters
 
 COLUMNS = ("Open", "High", "Low", "Close", "Volume")
 DTYPES = {"float32", "float64", "int32", "int64", "uint32", "uint64"}
 PROFILE_FIELDS = ("quoteType", "netExpenseRatio", "totalAssets", "currency", "longName", "shortName", "fundFamily")
+META_ADAPTER = TypeAdapter(data.Meta)
+
+
+class ETFProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    quoteType: Literal["ETF"]
+    netExpenseRatio: Finite | None
+    totalAssets: Finite | None
+    currency: str | None
+    longName: str | None
+    shortName: str | None
+    fundFamily: str | None
+
+
+def _profile_data(value: dict) -> dict:
+    try:
+        return ETFProfile.model_validate(value, strict=True).model_dump()
+    except ValidationError as error:
+        raise DataError(f"invalid snapshot ETF profile: {error}") from error
+
+
+def _check_session_time(meta: data.Meta, labels: list, provider: dict) -> None:
+    observed = data._aware(meta.observed_at)
+    last = data._aware(labels[-1])
+    if observed > data._aware(meta.retrieved_at):
+        raise ValueError("observation occurs after retrieval")
+    expected = None
+    if provider.get("instrumentType") == "CRYPTOCURRENCY":
+        expected = observed >= last.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+    else:
+        regular = (provider.get("currentTradingPeriod") or {}).get("regular") or {}
+        start, end = data._aware(regular.get("start")), data._aware(regular.get("end"))
+        if start is not None and end is not None and start < end and last.date() in {start.tz_convert(last.tz).date(), end.tz_convert(last.tz).date()}:
+            if observed < start:
+                raise ValueError("future regular session")
+            expected = observed >= end
+    if expected is not None and meta.last_bar_complete is not expected:
+        raise ValueError("completion contradicts captured session/observation times")
 
 
 def _serialize(prices: pd.DataFrame, meta: data.Meta) -> dict:
@@ -45,22 +85,32 @@ def _restore(value: dict) -> tuple[pd.DataFrame, data.Meta]:
             if dtype.startswith(("int", "uint")) and any(not isinstance(number, int) for number in numbers):
                 raise ValueError("integer column contains a noninteger")
             columns[name] = pd.Series(numbers, index=index, dtype=dtype)
-        meta = data.Meta(**value["meta"])
+        if not isinstance(value["meta"], dict) or set(value["meta"]) != {entry.name for entry in fields(data.Meta)}:
+            raise ValueError("invalid metadata fields")
+        meta = META_ADAPTER.validate_json(audit.canonical(value["meta"]), strict=True)
         if ((meta.last_bar_complete is not None and type(meta.last_bar_complete) is not bool)
                 or type(meta.include_incomplete_session) is not bool
                 or meta.last_bar_timestamp != labels[-1]
+                or meta.periods_per_year <= 0
+                or (not meta.include_incomplete_session and meta.last_bar_complete is not True)
                 or data._aware(meta.observed_at) is None or data._aware(meta.retrieved_at) is None):
             raise ValueError("invalid session metadata")
         for date, label in zip(index, labels, strict=True):
             stamp = data._aware(label)
             if stamp is None or stamp.tz_localize(None).normalize() != date:
                 raise ValueError("source labels do not match calculation dates")
+            if stamp > data._aware(meta.observed_at) or stamp > data._aware(meta.retrieved_at):
+                raise ValueError("source label occurs after acquisition/observation")
+        provider = value.get("provider_metadata")
+        if not isinstance(provider, dict):
+            raise ValueError("invalid provider metadata")
+        _check_session_time(meta, labels, provider)
         prices = pd.DataFrame(columns, index=index)
         data.require_prices(prices)
         if any(not math.isfinite(number) or number < 0 for number in prices.Volume):
             raise ValueError("invalid volume")
         prices.attrs["source_timestamps"] = labels
-        prices.attrs["provider_metadata"] = value.get("provider_metadata", {})
+        prices.attrs["provider_metadata"] = provider
         return prices, meta
     except (KeyError, TypeError, ValueError, OverflowError) as error:
         raise DataError(f"invalid snapshot history: {error}") from error
@@ -128,6 +178,7 @@ def load(snapshot_id: str) -> Dataset:
                     or set(profile["data"]) != set(PROFILE_FIELDS) or profile["data"]["quoteType"] != "ETF"
                     or data._aware(profile.get("retrieved_at")) is None):
                 raise ValueError("invalid ETF profile/provenance")
+            _profile_data(profile["data"])
     except (KeyError, TypeError, ValueError, ValidationError) as error:
         raise DataError(f"invalid snapshot schema: {error}") from error
     return Dataset(raw, histories, rates)
@@ -196,7 +247,7 @@ def acquire(tickers: list[str], period: str = "3y", benchmark: str | None = None
     for ticker, (prices, _) in histories.items():
         if prices.attrs.get("provider_metadata", {}).get("instrumentType") == "ETF":
             profile = data.info(ticker)
-            profiles[ticker] = {"data": {key: profile.get(key) for key in PROFILE_FIELDS},
+            profiles[ticker] = {"data": _profile_data({key: profile.get(key) for key in PROFILE_FIELDS}),
                                 "retrieved_at": datetime.now(UTC).isoformat()}
     payload = {"kind": "market_snapshot", "schema_version": 1, "parameters": parameters.model_dump(),
                "histories": {ticker: _serialize(*value) for ticker, value in histories.items()},

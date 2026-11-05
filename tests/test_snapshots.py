@@ -52,9 +52,10 @@ def market(monkeypatch, tmp_path):
                     "unrelated_private_profile_field": "must not be persisted"}
     monkeypatch.setattr(data.yf, "Ticker", Ticker)
     original = data.history
+    clock = {"observed_at": datetime.fromisoformat("2026-11-02T23:00Z")}
     monkeypatch.setattr(data, "history", lambda ticker, period="3y", include_incomplete_session=False: original(
-        ticker, period, include_incomplete_session, observed_at=datetime.fromisoformat("2026-11-02T23:00Z")))
-    return frames, metadata, calls
+        ticker, period, include_incomplete_session, observed_at=clock["observed_at"]))
+    return frames, metadata, calls, clock
 
 
 def acquire(**kwargs):
@@ -276,3 +277,65 @@ def test_snapshot_etf_close_warning_uses_captured_date_not_replay_clock(market, 
     Clock.month = 7
     second = server.etf_analysis("SPY", "AAPL", snapshot_id=snapshot_id)
     assert first == second
+
+
+@pytest.mark.parametrize("field,value", [
+    ("ticker", None), ("warnings", None), ("currency", []), ("periods_per_year", 0),
+    ("last_bar_complete", False),
+    ("observed_at", "2026-11-01T00:00:00Z"), ("retrieved_at", "2026-11-01T00:00:00Z"),
+])
+def test_malformed_snapshot_metadata_is_rejected_before_report_calculation(market, monkeypatch, field, value):
+    raw = audit.read(acquire()["snapshot_id"])
+    raw["histories"]["AAPL"]["meta"][field] = value
+    invalid = audit.put(raw)
+    forbid_yahoo(monkeypatch)
+    with pytest.raises(ToolError, match="snapshot") as error:
+        server.technical_indicators("AAPL", snapshot_id=invalid)
+    assert not isinstance(error.value, UnexpectedToolError)
+
+
+@pytest.mark.parametrize("field,value", [("netExpenseRatio", "invalid"), ("totalAssets", "invalid"), ("currency", [])])
+def test_malformed_snapshot_etf_values_are_rejected_before_report_calculation(market, monkeypatch, field, value):
+    raw = audit.read(acquire(tickers=["SPY"], benchmark="SPY")["snapshot_id"])
+    raw["profiles"]["SPY"]["data"][field] = value
+    invalid = audit.put(raw)
+    forbid_yahoo(monkeypatch)
+    with pytest.raises(ToolError, match="snapshot") as error:
+        server.etf_analysis("SPY", "SPY", snapshot_id=invalid)
+    assert not isinstance(error.value, UnexpectedToolError)
+
+
+def test_filtered_fx_benchmark_retains_aware_aligned_source_label(market, monkeypatch):
+    # The benchmark includes an extra final session; FX lacks its leading history.
+    for ticker in ("SPY", "USDEUR=X"):
+        next_row = market[0][ticker].iloc[[-1]].copy()
+        next_row.index += pd.Timedelta(days=1)
+        market[0][ticker] = pd.concat([market[0][ticker], next_row])
+    market[0]["USDEUR=X"] = market[0]["USDEUR=X"].loc["2025-01-01":]
+    market[3]["observed_at"] = datetime.fromisoformat("2026-11-03T23:00Z")
+    # Rome primary ends Nov2; New York benchmark ends Nov3. Unknown latest bar is opt-in.
+    snapshot_id = acquire(tickers=["ENI.MI"], benchmark="SPY", include_incomplete_session=True)["snapshot_id"]
+    forbid_yahoo(monkeypatch)
+    report = server.risk_metrics("ENI.MI", benchmark="SPY", snapshot_id=snapshot_id)
+    assert report["comparison_window"]["end"] == "2026-11-02"
+    source = report["session_sources"]["SPY"]
+    assert source["last_bar_timestamp"] == "2026-11-02T00:00:00-05:00"
+    assert source["last_bar_complete"] is True
+
+
+def test_snapshot_cannot_claim_completion_before_captured_regular_close(market, monkeypatch):
+    raw = audit.read(acquire()["snapshot_id"])
+    meta = raw["histories"]["AAPL"]["meta"]
+    meta["observed_at"] = meta["retrieved_at"] = "2026-11-02T15:00:00Z"
+    invalid = audit.put(raw)
+    forbid_yahoo(monkeypatch)
+    with pytest.raises(ToolError, match="snapshot"):
+        server.technical_indicators("AAPL", snapshot_id=invalid)
+
+
+def test_invalid_provider_etf_profile_is_domain_error_without_publishing(market, monkeypatch):
+    monkeypatch.setattr(data, "info", lambda ticker: {"quoteType": "ETF", "netExpenseRatio": "invalid"})
+    with pytest.raises(ToolError, match="snapshot") as error:
+        acquire(tickers=["SPY"])
+    assert not isinstance(error.value, UnexpectedToolError)
+    assert not audit.root().exists()
