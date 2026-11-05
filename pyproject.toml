@@ -1,10 +1,12 @@
 [project]
 name = "broker-analysis-mcp"
-version = "0.4.1"
-description = "MCP server for financial analysis on Yahoo Finance data with local audit records (prototype)"
+version = "0.5.0"
+description = "MCP server for financial analysis on Yahoo Finance data with local audit records"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "anyio>=4.12.0",
+    "filelock>=3.20.0",
     "matplotlib>=3.11.2",
     "mcp[cli]>=2.3.0",
     "numpy>=2.5.4",
@@ -17,6 +19,7 @@ dependencies = [
 broker-analysis-mcp = "broker_analysis_mcp.server:main"
 broker-analysis-hooks = "broker_analysis_mcp.hooks:main"
 broker-analysis-monitor = "broker_analysis_mcp.monitoring:main"
+broker-analysis-archive = "broker_analysis_mcp.archive:main"
 
 [build-system]
 requires = ["uv_build>=0.11.32,<0.14.0"]

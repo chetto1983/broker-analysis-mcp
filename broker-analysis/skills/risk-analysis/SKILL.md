@@ -7,8 +7,9 @@ description: Risk analysis of securities and portfolios with risk_metrics and po
 
 ## Rules
 - Every number comes from `risk_metrics` for one security or `portfolio_risk` for holdings: do not compute anything yourself, not even an average.
-- Always state the data window (`window.start`–`window.end`), the currency and the source (Yahoo Finance, prototype).
+- Always state the data window (`window.start`–`window.end`), the currency and the source (Yahoo Finance via yfinance, unofficial).
 - Report the tool's `warnings`. If a value is `null`, say that it is not available and why.
+- Use `reason_code` and the named inputs to distinguish missing data, insufficient history, inapplicable metrics and undefined results. For a tool error, explain `code`, `field` and `message`; retry only when `retryable` permits it. Never fill gaps with estimates.
 - This is internal analysis, not a personalised recommendation to a client.
 - Reply in the language of the question: English for a question in English, Italian for one in Italian. Use that language's number format (22.1% in English, 22,1% in Italian).
 

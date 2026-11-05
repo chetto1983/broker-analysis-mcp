@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from . import custom, data, expr, snapshots
 from .catalog import describe
+from .diagnostics import unavailable
 from .hooks import home
 from .models import ConditionSpec, HistoryParameters, IndicatorSpec, LevelSpec, SeriesSpec, validate_parameters
 
@@ -66,6 +67,15 @@ def run(
         **data.session_metadata(meta),
         "snapshot_id": snapshot_id,
     }
+    result["series_diagnostics"] = {}
+    for plot in plots:
+        if result["series_last_values"][plot["id"]] is None:
+            lookback = plot["params"].get("n")
+            short = isinstance(lookback, (int, float)) and lookback > len(prices)
+            result["series_diagnostics"][plot["id"]] = unavailable(
+                "insufficient_history" if short else "undefined",
+                f"{plot['id']}: {len(prices)} source bars cannot satisfy lookback {lookback}; request a longer period" if short
+                else f"{plot['id']} has no finite result for the configured indicator/expression; check its input series and denominators")
     png = None
     if chart:
         from . import charts

@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pandas as pd
 
 from . import data, indicators, risk, scores, snapshots
+from .diagnostics import fundamental_nulls, risk_nulls, unavailable
+from .errors import error_payload
 from .fundamentals import (
     CapitalInputs,
     Year,
@@ -30,7 +32,9 @@ logger = logging.getLogger(__name__)
 
 def _metric(value: float | None, unit: str, ref: str, digits: int = 4) -> dict:
     if value is None or (isinstance(value, float) and not math.isfinite(value)):
-        return {"value": None, "unit": unit, "ref": ref, "reason": "input unavailable or metric undefined for these observations"}
+        return {"value": None, "unit": unit, "ref": ref,
+                **unavailable("missing_input" if value is None else "undefined",
+                              f"{ref} input was not reported" if value is None else f"{ref} calculation is not finite")}
     scaled = value * 100 if unit == "%" else value
     return {"value": round(scaled, digits), "unit": unit, "ref": ref}
 
@@ -117,7 +121,7 @@ def _benchmark_metrics(
     monthly = risk.monthly_returns(prices)
     capm = risk.capm_measures(r, b, rf_annual, periods)
     capture = risk.capture_ratios(monthly.iloc[:, 0], monthly.iloc[:, 1])
-    return {
+    metrics = {
         "beta": _metric(risk.beta(r, b), "ratio", "beta"),
         "correlation": _metric(risk.correlation(r, b), "ratio", "beta"),
         "beta_weekly_2y": _metric(raw, "ratio", "beta_adjusted"),
@@ -136,6 +140,8 @@ def _benchmark_metrics(
         "up_months": _metric(capture["up_months"], "months", "capture", 0),
         "down_months": _metric(capture["down_months"], "months", "capture", 0),
     }
+    risk_nulls(metrics, returns=len(r), weeks=len(weekly), up_months=capture["up_months"], down_months=capture["down_months"])
+    return metrics
 
 
 def _comparison_warnings(meta: data.Meta, benchmark: data.Meta) -> list[str]:
@@ -179,6 +185,7 @@ def risk_report(
         "expected_shortfall_1d": _metric(risk.expected_shortfall(r, alpha), "%", "var_historical"),
         "var_cornish_fisher_1d": _metric(risk.var_cornish_fisher(r, alpha), "%", "var_cornish_fisher"),
     }
+    risk_nulls(metrics, returns=len(r))
     session = data.session_metadata(meta)
     comparison_window = None
     if benchmark:
@@ -269,6 +276,9 @@ def technical_report(ticker: str, period: str | None = None, params: dict | None
             metric["required_observations"] = need
             if len(prices) < need:
                 metric["reason"] = f"insufficient observations: {len(prices)} prices, need {need}; request a longer period"
+                metric["reason_code"] = "insufficient_history"
+            else:
+                metric.update(unavailable("undefined", f"{key} has no finite value after its configured warmup; check zero denominators and price dispersion"))
             meta.warnings.append(f"{key}: {metric['reason']}")
     return {
         "ticker": ticker,
@@ -320,6 +330,11 @@ def _scores(years: list[Year], market_cap: float, sector: str | None, warnings: 
         "altman_z_double_prime": _metric(z["z_double_prime"], "score", "altman", 2),
         "beneish_m": _metric(m["m"], "score", "beneish", 2),
     }
+    for key, detail in (("piotroski_f_score", f), ("altman_z", z), ("altman_z_double_prime", z), ("beneish_m", m)):
+        if metrics[key]["value"] is None:
+            missing = detail["missing"]
+            metrics[key].update(unavailable("missing_input" if missing else "not_applicable",
+                                            f"{key} requires valid score components: {', '.join(missing) or 'positive formula denominators'}", missing))
     return metrics, _rounded({"piotroski": f, "altman": z, "beneish": m})
 
 
@@ -372,14 +387,23 @@ def fundamentals_report(
     else:
         warnings.append("cost of equity, WACC and EVA need risk_free_annual and equity_risk_premium from the analyst")
     metrics = {k: _metric(v, _unit(k, fin_ccy), "fundamentals", 2 if k in MONEY else 4) for k, v in values.items()}
+    for key, diagnostic in fundamental_nulls(years, values).items():
+        metrics[key].update(diagnostic)
     diagnostics = capital_diagnostics(years, market_cap, risk_free_annual, equity_risk_premium, used_beta, values)
     for key, diagnostic in diagnostics.items():
         metrics[key].update(diagnostic)
+        metrics[key]["reason_code"] = "missing_input" if diagnostic["missing_inputs"] else "not_applicable"
         warnings.append(f"{key}: {diagnostic['reason']}")
     metrics["yahoo_trailing_pe_ttm"] = _metric(profile.get("trailingPE"), "ratio", "fundamentals")
     metrics["yahoo_dividend_yield"] = _metric(
-        (profile.get("dividendYield") or 0) / 100 if profile.get("dividendYield") else None, "%", "fundamentals"
+        profile["dividendYield"] / 100 if profile.get("dividendYield") is not None else None, "%", "fundamentals"
     )
+    for key, field in (("yahoo_trailing_pe_ttm", "trailingPE"), ("yahoo_dividend_yield", "dividendYield")):
+        if metrics[key]["value"] is None:
+            metrics[key].update(unavailable("missing_input" if profile.get(field) is None else "undefined",
+                                            f"Yahoo profile field {field} is {'missing' if profile.get(field) is None else 'non-finite'}",
+                                            [field] if profile.get(field) is None else (),
+                                            [field] if profile.get(field) is not None else ()))
     score_metrics, score_details = _scores(years, float(market_cap), profile.get("sector"), warnings)
     metrics |= score_metrics
     return {
@@ -405,21 +429,23 @@ def fundamentals_report(
 def peer_report(tickers: list[str]) -> dict:
     """One fundamentals report per company, with references once and without score components,
     which would push a ten-company answer past an MCP client's tool-result limit."""
-    rows, errors, refs = {}, {}, {}
+    rows, errors, refs, error_details = {}, {}, {}, {}
     for ticker in tickers:
         try:
             report = fundamentals_report(ticker)
         except data.DataError as err:
             errors[ticker] = str(err)
+            error_details[ticker] = error_payload(err)
             continue
-        except Exception:  # one failing ticker must not discard the reports already built
-            logger.exception("Fundamental analysis failed for %r", ticker)
+        except Exception as err:  # one failing ticker must not discard the reports already built
+            logger.error("Fundamental analysis failed (%s)", type(err).__name__)
             errors[ticker] = "analysis failed; retry or check server logs"
+            error_details[ticker] = error_payload(err)
             continue
         refs |= report.pop("references")
         report.pop("scores")
         rows[ticker] = report
-    return {"companies": rows, "errors": errors, "references": refs, **data.report_metadata()}
+    return {"companies": rows, "errors": errors, "error_details": error_details, "references": refs, **data.report_metadata()}
 
 
 def etf_report(ticker: str, benchmark: str, period: str | None = None, include_incomplete_session: bool | None = None,
@@ -448,10 +474,16 @@ def etf_report(ticker: str, benchmark: str, period: str | None = None, include_i
         "weeks_for_tracking_error": _metric(t["weeks"], "weeks", "tracking", 0),
         "total_assets": _metric(profile.get("totalAssets"), profile.get("currency") or "?", "tracking", 0),
     }
+    for key, field in (("ter", "netExpenseRatio"), ("total_assets", "totalAssets")):
+        if metrics[key]["value"] is None:
+            metrics[key].update(unavailable("missing_input" if profile.get(field) is None else "undefined",
+                                            f"ETF profile field {field} is {'missing' if profile.get(field) is None else 'non-finite'}",
+                                            [field] if profile.get(field) is None else (),
+                                            [field] if profile.get(field) is not None else ()))
     warnings = _comparison_warnings(meta, bench_meta)
     if t["weeks"] < 2:
         metrics["tracking_error"].update(reason=f"insufficient observations: {int(t['weeks'])} weekly returns, need 2; request a longer period",
-                                          required_observations=2)
+                                          reason_code="insufficient_history", required_observations=2)
         warnings.append(f"tracking_error: {metrics['tracking_error']['reason']}")
     if utc_offset(meta.timezone, meta.observed_at) != utc_offset(bench_meta.timezone, bench_meta.observed_at):
         warnings.append(

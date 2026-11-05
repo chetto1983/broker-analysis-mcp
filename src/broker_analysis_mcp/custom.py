@@ -13,6 +13,7 @@ import pandas as pd
 
 from . import expr
 from .catalog import CATALOG, SpecError, resolve_params
+from .diagnostics import unavailable
 from .models import ConditionSpec, IndicatorSpec, SeriesSpec
 
 PALETTE = ["#2563EB", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#0EA5E9", "#D946EF", "#84CC16"]
@@ -104,7 +105,8 @@ def condition_series(spec: ConditionSpec, ns: dict[str, pd.Series]) -> tuple[pd.
 
 def _stats(returns: np.ndarray) -> dict:
     if len(returns) == 0:
-        return {"n": 0, "mean_pct": None, "median_pct": None, "hit_rate_pct": None}
+        return {"n": 0, "mean_pct": None, "median_pct": None, "hit_rate_pct": None,
+                **unavailable("insufficient_history", "no eligible forward observations in this sample")}
     return {
         "n": len(returns),
         "mean_pct": round(float(np.mean(returns)) * 100, 3),
@@ -128,6 +130,11 @@ def event_study(events: pd.Series, close: pd.Series) -> dict:
             se = math.sqrt(np.var(after, ddof=1) / len(after) + np.var(forward, ddof=1) / len(forward))
             t = round(float((np.mean(after) - np.mean(forward)) / se), 2) if se > 0 else None
         out[f"{h}d"] = {"after_events": cond, "all_bars": base, "difference_t_stat": t}
+        if t is None:
+            out[f"{h}d"]["difference_t_stat_diagnostic"] = unavailable(
+                "insufficient_history" if cond["n"] < 2 else "undefined",
+                "difference t statistic needs at least two completed event windows" if cond["n"] < 2
+                else "forward-return comparison standard error is zero")
     return out
 
 
@@ -159,7 +166,7 @@ def condition_report(spec: ConditionSpec, ns: dict[str, pd.Series]) -> tuple[dic
 def last_values(ns: dict[str, pd.Series], plots: list[dict]) -> dict:
     out = {}
     for p in plots:
-        s = ns[p["id"]].dropna()
+        s = ns[p["id"]].replace([np.inf, -np.inf], np.nan).dropna()
         out[p["id"]] = None if s.empty else round(float(s.iloc[-1]), 4)
     return out
 

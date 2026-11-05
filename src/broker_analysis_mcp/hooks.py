@@ -18,14 +18,17 @@ import os
 import re
 import urllib.request
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import pandas as pd
+from filelock import FileLock, Timeout
 
 from . import audit, custom, data, expr
 from .catalog import SpecError
+from .errors import DataError, error_payload
 from .models import ConditionSpec, HookAction, IndicatorSpec, SeriesSpec
 
 Loader = Callable[[str, str], tuple[pd.DataFrame, data.Meta]]
@@ -52,9 +55,16 @@ def load_hooks() -> dict[str, dict]:
 
 
 def _save(hooks: dict[str, dict]) -> None:
-    tmp = _store().with_suffix(".tmp")
-    tmp.write_text(json.dumps(hooks, indent=1, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(_store())
+    audit.write_state(_store(), hooks)
+
+
+@contextmanager
+def _lock():
+    try:
+        with FileLock(home() / ".hooks.lock", timeout=10, is_singleton=True):
+            yield
+    except Timeout:
+        raise DataError("hook configuration is busy; retry later", code="STORAGE_BUSY", retryable=True) from None
 
 
 def _allowed_prefixes() -> list[str]:
@@ -125,9 +135,10 @@ def create(
     prices, _, events, _ = _evaluate(hook, loader)
     dates = [str(d.date()) for d in events.index[events.to_numpy()]]
     hook["last_event"] = dates[-1] if dates else None
-    hooks = load_hooks()
-    hooks[hook["id"]] = hook
-    _save(hooks)
+    with _lock():
+        hooks = load_hooks()
+        hooks[hook["id"]] = hook
+        _save(hooks)
     return {
         "hook": hook,
         "data_until": str(prices.index[-1].date()),
@@ -186,6 +197,11 @@ def _save_bookmarks(bookmarks: dict[str, str]) -> None:
 
 
 def run(loader: Loader = _live_history) -> dict:
+    with _lock():
+        return _run(loader)
+
+
+def _run(loader: Loader) -> dict:
     """Evaluates every hook; one failing hook or delivery is reported and does not stop the others."""
     (home() / "alerts").mkdir(exist_ok=True)
     fired, failed, checked, bookmarks = [], [], [], {}
@@ -194,7 +210,8 @@ def run(loader: Loader = _live_history) -> dict:
             try:
                 prices, ns, events, meta = _evaluate(hook, loader)
             except Exception as err:
-                failed.append({"hook_id": hook_id, "error": f"{type(err).__name__}: {err}"})
+                detail = error_payload(err)
+                failed.append({"hook_id": hook_id, "error": f"{type(err).__name__}: {detail['message']}", "error_details": detail})
                 continue
             checked.append({"hook_id": hook_id, "data_until": str(prices.index[-1].date())})
             last = hook["last_event"]
@@ -203,8 +220,10 @@ def run(loader: Loader = _live_history) -> dict:
                 try:
                     deliver(hook["action"], payload)
                 except Exception as err:
+                    detail = error_payload(err)
                     failed.append({
-                        "hook_id": hook_id, "event_date": payload["event_date"], "error": f"{type(err).__name__}: {err}",
+                        "hook_id": hook_id, "event_date": payload["event_date"],
+                        "error": f"{type(err).__name__}: {detail['message']}", "error_details": detail,
                     })
                     break
                 bookmarks[hook_id] = payload["event_date"]
@@ -215,9 +234,10 @@ def run(loader: Loader = _live_history) -> dict:
 
 
 def delete(hook_id: str) -> bool:
-    hooks = load_hooks()
-    removed = hooks.pop(hook_id, None) is not None
-    _save(hooks)
+    with _lock():
+        hooks = load_hooks()
+        removed = hooks.pop(hook_id, None) is not None
+        _save(hooks)
     return removed
 
 

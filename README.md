@@ -1,6 +1,6 @@
 # broker-analysis-mcp
 
-Prototype of an **MCP server for financial analysis** for a broker's analysts, with
+An **MCP server for financial analysis** for a broker's analysts, with
 skills that teach the agent how to read every number. Data from Yahoo Finance through
 `yfinance`.
 
@@ -19,10 +19,12 @@ its dependencies and Python 3.13 if it is missing.
 | Codex | `codex plugin marketplace add chetto1983/broker-analysis-mcp`, then `codex plugin add broker-analysis@broker-analysis-mcp` |
 | Aura | Install `chetto1983/broker-analysis-mcp/broker-analysis` from the cockpit's Governance plugin board; upgrade an existing installation from the same board. The server runs in each identity's sandbox box. |
 
-> **Prototype only.** yfinance reads Yahoo's unofficial endpoints, is meant for personal and
-> research use, and can break without notice. Production needs a licensed data source
-> (Bloomberg or LSEG through their MCP servers, or a vendor with redistribution rights). Nothing
-> here places orders or gives personalised advice.
+> **Data source.** yfinance reads Yahoo's unofficial endpoints, is meant for personal and
+> research use, and can break without notice. Check the source's permitted use for your
+> deployment. Nothing here places orders or gives personalised advice.
+
+Operational controls, bounded execution, telemetry and archive recovery are described in
+[OPERATIONS.md](docs/OPERATIONS.md). Standalone MCP tests do not require Aura.
 
 ## Tools
 

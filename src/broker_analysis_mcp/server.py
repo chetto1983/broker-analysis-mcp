@@ -1,4 +1,4 @@
-"""MCP server for financial analysis on Yahoo Finance data (prototype).
+"""MCP server for financial analysis on Yahoo Finance data.
 
 Every tool returns computed numbers with unit, formula reference, data window, source and
 warnings. The model interprets them; it never computes a metric itself.
@@ -8,13 +8,13 @@ import json
 from collections.abc import Callable
 from typing import Annotated, Any, Literal
 
-from mcp.server.mcpserver import Image, MCPServer
+from mcp.server.mcpserver import Image
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from .errors import DataError, SpecError
-from .models import (
+from broker_analysis_mcp.errors import DataError, SpecError
+from broker_analysis_mcp.models import (
     AnalysisPeriod,
     AnnualRate,
     BandWidth,
@@ -35,15 +35,16 @@ from .models import (
     StressScenario,
     WilderPeriod,
 )
+from broker_analysis_mcp.runtime import BoundedServer
 
 INSTRUCTIONS = (
-    "Financial analysis on Yahoo Finance data (prototype, unofficial source); no trading operations. "
+    "Financial analysis on Yahoo Finance data (unofficial source); no trading operations. "
     "Use these tools for every number you report; quote each value with its unit, data window "
     "and source; never compute a metric yourself. Yahoo tickers: Milan .MI, London .L, "
     "Xetra .DE, Paris .PA, Amsterdam .AS; indices start with ^ (^GSPC, ^SP500TR, FTSEMIB.MI)."
 )
 
-server = MCPServer("broker-analysis", instructions=INSTRUCTIONS)
+server = BoundedServer("broker-analysis", instructions=INSTRUCTIONS)
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 WRITES_HOOKS = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
 # Yahoo reads are open-world; each run adds fresh timestamped local records.

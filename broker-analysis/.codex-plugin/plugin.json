@@ -1,6 +1,6 @@
 {
   "name": "broker-analysis",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Financial analysis on Yahoo Finance data: security and portfolio risk, fundamentals, technicals, ETFs, model validation reports, local audit records and alert hooks. No trading operations.",
   "author": {
     "name": "Davide Marchetto"
@@ -14,7 +14,7 @@
   "interface": {
     "displayName": "Broker Analysis",
     "shortDescription": "Portfolio and security risk, model reports, fundamentals and ETF analysis",
-    "longDescription": "Financial analysis for broker analysts: portfolio and security risk, fundamentals, technical indicators, ETF tracking, charts and alerts. Portfolio runs save exact local snapshots and separate development, validation and monitoring reports. No trades are placed. Prototype: unofficial Yahoo Finance data through yfinance.",
+    "longDescription": "Financial analysis for broker analysts: portfolio and security risk, fundamentals, technical indicators, ETF tracking, charts and alerts. Portfolio runs save exact local snapshots and separate development, validation and monitoring reports. No trades are placed. Unofficial Yahoo Finance data through yfinance.",
     "developerName": "Davide Marchetto",
     "category": "Finance",
     "capabilities": ["Read"],

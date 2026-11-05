@@ -1,6 +1,6 @@
 """Yahoo Finance access through yfinance.
 
-Prototype only: yfinance reads Yahoo's unofficial endpoints, is meant for personal and research
+yfinance reads Yahoo's unofficial endpoints, is meant for personal and research
 use, and can break without notice. Every result carries its source and retrieval time so an
 analyst can tell where a number came from.
 """
@@ -17,11 +17,17 @@ from .errors import DataError
 from .fundamentals import Year
 from .models import HistoryParameters, validate_parameters
 from .risk import PERIODS, periods_per_year
+from .telemetry import provider_operation
 
-SOURCE = "Yahoo Finance via yfinance (unofficial, prototype only)"
+SOURCE = "Yahoo Finance via yfinance (unofficial)"
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", module="yfinance")
+
+# Public yfinance controls: config.py and data.py in the pinned 1.7.0 release.
+# Native retries cover transient transport failures; rate limits are returned to callers.
+yf.config.network.retries = 1
+yf.config.debug.hide_exceptions = False
 
 
 @dataclass
@@ -240,14 +246,17 @@ def _normalise_currency(prices: pd.DataFrame, currency: str) -> tuple[pd.DataFra
     return prices, currency
 
 
+@provider_operation
 def history(ticker: str, period: str = "3y", include_incomplete_session: bool = False,
             *, observed_at: datetime | None = None) -> tuple[pd.DataFrame, Meta]:
     """Daily OHLC adjusted for splits and dividends (total-return closes)."""
     validate_parameters(HistoryParameters, period=period)
     t = yf.Ticker(ticker)
-    prices = t.history(period=period, interval="1d", auto_adjust=True)
+    prices = t.history(period=period, interval="1d", auto_adjust=True, timeout=10)
     if prices.empty:
         raise DataError(f"no price history for {ticker!r}")
+    if not {"Open", "High", "Low", "Close", "Volume"} <= set(prices.columns):
+        raise DataError("provider price history is missing required OHLCV columns", code="INVALID_PROVIDER_DATA")
     prices = prices[["Open", "High", "Low", "Close", "Volume"]].dropna(subset=["Close"])
     raw_meta = t.history_metadata or {}
     meta = {key: raw_meta.get(key) for key in ("currency", "exchangeTimezoneName", "instrumentType", "currentTradingPeriod", "regularMarketTime")}
@@ -270,14 +279,21 @@ def history(ticker: str, period: str = "3y", include_incomplete_session: bool = 
     )
 
 
+@provider_operation
 def fx_rate(from_ccy: str, to_ccy: str) -> float:
     if from_ccy == to_ccy:
         return 1.0
     pair = f"{from_ccy}{to_ccy}=X"
-    closes = yf.Ticker(pair).history(period="5d")["Close"].dropna()
+    frame = yf.Ticker(pair).history(period="5d", timeout=10)
+    if "Close" not in frame:
+        raise DataError("no FX close column from provider", code="INVALID_PROVIDER_DATA")
+    closes = frame["Close"].dropna()
     if closes.empty:
         raise DataError(f"no FX rate for {pair}")
-    return float(closes.iloc[-1])
+    rate = float(closes.iloc[-1])
+    if not math.isfinite(rate) or rate <= 0:
+        raise DataError("FX rate must be finite and positive", code="INVALID_PROVIDER_DATA")
+    return rate
 
 
 def fx_series(from_ccy: str, to_ccy: str, period: str, include_incomplete_session: bool = False) -> pd.Series:
@@ -290,6 +306,7 @@ def fx_series(from_ccy: str, to_ccy: str, period: str, include_incomplete_sessio
     return closes
 
 
+@provider_operation
 def info(ticker: str) -> dict:
     data = yf.Ticker(ticker).info or {}
     if not data or data.get("quoteType") is None:
@@ -351,6 +368,7 @@ def _value(frames: dict[str, pd.DataFrame], pairs: tuple[tuple[str, str], ...], 
     return None
 
 
+@provider_operation
 def statements(ticker: str) -> tuple[list[Year], str, str]:
     """Annual statements newest first, their currency and the latest fiscal year end.
 

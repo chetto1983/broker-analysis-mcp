@@ -20,3 +20,4 @@ jobs:
       - run: uv run ruff check .
       # Offline only: the live tier reads Yahoo Finance, which a CI runner cannot be trusted to reach.
       - run: uv run pytest
+      - run: uv run python scripts/operational_acceptance.py --fixture --requests 100 --concurrency 4 --output operational-evidence.json

@@ -81,7 +81,7 @@ def render(
         ax.grid(color=GRID, linewidth=0.6)
         ax.spines[["top", "right"]].set_visible(False)
     axes[-1].xaxis.set_major_formatter(mdates.ConciseDateFormatter(mdates.AutoDateLocator()))
-    fig.text(0.99, 0.005, "Source: Yahoo Finance via yfinance (unofficial, prototype)", ha="right", fontsize=7, color="#6B7280")
+    fig.text(0.99, 0.005, "Source: Yahoo Finance via yfinance (unofficial)", ha="right", fontsize=7, color="#6B7280")
     fig.savefig(path, dpi=110, bbox_inches="tight")
     plt.close(fig)
     return path
