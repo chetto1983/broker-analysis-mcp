@@ -138,6 +138,11 @@ def _benchmark_metrics(
     }
 
 
+def _comparison_warnings(meta: data.Meta, benchmark: data.Meta) -> list[str]:
+    warnings = meta.warnings + benchmark.warnings
+    return list(dict.fromkeys(warnings)) if meta.ticker.upper() == benchmark.ticker.upper() else warnings
+
+
 def risk_report(
     ticker: str,
     period: str | None = None,
@@ -179,7 +184,7 @@ def risk_report(
     if benchmark:
         bench_prices, bench_meta = snapshots.history(dataset, benchmark, period, include)
         bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, include, dataset)
-        meta.warnings.extend(bench_meta.warnings)
+        meta.warnings = _comparison_warnings(meta, bench_meta)
         common = min(n, bench_meta.periods_per_year)
         metrics |= _benchmark_metrics(prices["Close"], bench_prices["Close"], rf_annual, common, meta.warnings)
         aligned = risk.aligned(prices["Close"], bench_prices["Close"])
@@ -443,7 +448,7 @@ def etf_report(ticker: str, benchmark: str, period: str | None = None, include_i
         "weeks_for_tracking_error": _metric(t["weeks"], "weeks", "tracking", 0),
         "total_assets": _metric(profile.get("totalAssets"), profile.get("currency") or "?", "tracking", 0),
     }
-    warnings = meta.warnings + bench_meta.warnings
+    warnings = _comparison_warnings(meta, bench_meta)
     if t["weeks"] < 2:
         metrics["tracking_error"].update(reason=f"insufficient observations: {int(t['weeks'])} weekly returns, need 2; request a longer period",
                                           required_observations=2)

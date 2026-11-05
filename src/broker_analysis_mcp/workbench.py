@@ -44,6 +44,8 @@ def run(
     prices, meta = snapshots.history(dataset, ticker, period, include)
     data.require_prices(prices)
     ns, plots = custom.build(prices, indicators, series, meta.periods_per_year)
+    if chart:
+        custom.chart_groups(plots)
     reports, marked = [], []
     for spec in conditions:
         report, events = custom.condition_report(spec, ns)
@@ -59,7 +61,7 @@ def run(
         "conditions": reports,
         "source": meta.source,
         "retrieved_at": meta.retrieved_at,
-        "warnings": meta.warnings,
+        "warnings": meta.warnings + custom.warmup_warnings(ns, plots),
         **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
         **data.session_metadata(meta),
         "snapshot_id": snapshot_id,

@@ -70,10 +70,26 @@ def build(
             "id": spec.id, "group": spec.id, "fn": "expr", "params": {"expr": spec.expr}, "pane": spec.pane,
             "color": spec.color or PALETTE[(len(indicators) + k) % len(PALETTE)], "guides": [],
         })
-    lower = {p["group"] for p in plots if p["pane"] == "lower"}
-    if len(lower) > MAX_LOWER_PANES:
-        raise SpecError(f"at most {MAX_LOWER_PANES} lower panes, got {len(lower)}: {sorted(lower)}")
     return ns, plots
+
+
+def chart_groups(plots: list[dict]) -> list[str]:
+    groups = list(dict.fromkeys(p["group"] for p in plots if p["pane"] == "lower"))
+    if len(groups) > MAX_LOWER_PANES:
+        raise SpecError(f"at most {MAX_LOWER_PANES} lower panes, got {len(groups)}: {sorted(groups)}")
+    return groups
+
+
+def warmup_warnings(ns: dict[str, pd.Series], plots: list[dict]) -> list[str]:
+    warnings = []
+    for plot in plots:
+        lookback = plot["params"].get("n")
+        source = plot["params"].get("source", "close")
+        available = int(np.isfinite(ns[source]).sum())
+        if lookback is not None and available < lookback:
+            warnings.append(f"{plot['id']}: insufficient observations: configured lookback {lookback} "
+                            f"exceeds {available} finite {source} observations; request a longer period")
+    return warnings
 
 
 def condition_series(spec: ConditionSpec, ns: dict[str, pd.Series]) -> tuple[pd.Series, pd.Series]:

@@ -12,10 +12,74 @@ import pandas as pd
 import pytest
 from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
-from broker_analysis_mcp import analysis, data, server, workbench
+from broker_analysis_mcp import analysis, audit, data, server, workbench
 from broker_analysis_mcp.catalog import SpecError, resolve_params
 from broker_analysis_mcp.fundamentals import Year
-from broker_analysis_mcp.models import IndicatorSpec
+from broker_analysis_mcp.models import IndicatorSpec, SeriesSpec
+
+
+def test_numeric_custom_analysis_accepts_five_lower_groups_without_files(monkeypatch, tmp_path):
+    monkeypatch.setattr(data, "history", lambda *a: (prices(), data.Meta("A", "USD")))
+    home = tmp_path / "uncreated-home"
+    monkeypatch.setenv("BROKER_ANALYSIS_HOME", str(home))
+    result, png = workbench.run("A", "1y", [IndicatorSpec(id=f"r{i}", fn="rsi") for i in range(4)],
+                                [SeriesSpec(id="gap", expr="close / open - 1")], [], [], False)
+    assert set(result["series_last_values"]) == {"r0", "r1", "r2", "r3", "gap"}
+    assert all(value is not None for value in result["series_last_values"].values())
+    assert png is None and not home.exists()
+
+
+def test_custom_warmup_names_series_and_actual_source_observations(monkeypatch):
+    monkeypatch.setattr(data, "history", lambda *a: (prices(751), data.Meta("A", "USD")))
+    result, _ = workbench.run("A", "3y", [IndicatorSpec(id="sma1000", fn="sma", params={"n": 1000})],
+                              [], [], [], False)
+    assert result["series_last_values"]["sma1000"] is None
+    assert any("sma1000" in warning and "751" in warning and "1000" in warning and
+               "insufficient" in warning and "longer period" in warning for warning in result["warnings"])
+
+
+@pytest.mark.parametrize("kind", ["risk", "etf"])
+def test_identity_comparisons_do_not_duplicate_same_source_warnings(monkeypatch, kind):
+    def history(ticker, *args):
+        return prices(), data.Meta(ticker, "USD", warnings=["Excluded 1 incomplete, unknown or future daily bars"])
+    monkeypatch.setattr(data, "history", history)
+    monkeypatch.setattr(data, "info", lambda *a: {"quoteType": "ETF"})
+    report = (analysis.risk_report if kind == "risk" else analysis.etf_report)("SPY", benchmark="SPY")
+    assert len([warning for warning in report["warnings"] if "Excluded" in warning]) == 1
+
+
+@pytest.mark.parametrize("kind", ["risk", "etf"])
+def test_identity_comparisons_retain_distinct_acquisition_warnings(monkeypatch, kind):
+    messages = iter(["Excluded 1 incomplete bar", "Excluded 2 incomplete bars"])
+    monkeypatch.setattr(data, "history", lambda ticker, *args: (prices(), data.Meta(ticker, "USD", warnings=[next(messages)])))
+    monkeypatch.setattr(data, "info", lambda *a: {"quoteType": "ETF"})
+    report = (analysis.risk_report if kind == "risk" else analysis.etf_report)("SPY", benchmark="SPY")
+    assert {"Excluded 1 incomplete bar", "Excluded 2 incomplete bars"} <= set(report["warnings"])
+
+
+@pytest.mark.parametrize("failure", ["missing", "denied", "malformed_json"])
+def test_audit_read_errors_do_not_expose_internal_paths(monkeypatch, tmp_path, failure):
+    home = tmp_path / "private-server-path"
+    monkeypatch.setenv("BROKER_ANALYSIS_HOME", str(home))
+    if failure == "denied":
+        def denied(*args):
+            raise PermissionError(f"permission denied: {home}/records/private.json")
+        monkeypatch.setattr(type(home), "read_bytes", denied)
+    elif failure == "malformed_json":
+        import hashlib
+
+        raw = b"{bad json"
+        object_id = hashlib.sha256(raw).hexdigest()
+        folder = home / "records"
+        folder.mkdir(parents=True)
+        (folder / f"{object_id}.json").write_bytes(raw)
+    else:
+        object_id = "0" * 64
+    with pytest.raises(data.DataError) as error:
+        audit.read(object_id if failure != "denied" else "0" * 64)
+    assert str(home) not in str(error.value)
+    assert "private.json" not in str(error.value)
+    assert "not found" in str(error.value) if failure == "missing" else "cannot read" in str(error.value)
 
 
 def test_server_catalog_starts_without_importing_analysis_dependencies():

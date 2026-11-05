@@ -31,11 +31,16 @@ def read(object_id: str) -> dict:
         raise DataError("record id must be a SHA-256 hex digest")
     try:
         raw = (root() / f"{object_id}.json").read_bytes()
-        if hashlib.sha256(raw).hexdigest() != object_id:
-            raise DataError("record integrity check failed")
+    except FileNotFoundError:
+        raise DataError("cannot read verified record: not found; check the snapshot or record id") from None
+    except OSError:
+        raise DataError("cannot read verified record") from None
+    if hashlib.sha256(raw).hexdigest() != object_id:
+        raise DataError("record integrity check failed")
+    try:
         return json.loads(raw)
-    except (OSError, ValueError) as err:
-        raise DataError(f"cannot read verified record: {err}") from err
+    except ValueError:
+        raise DataError("cannot read verified record: invalid JSON") from None
 
 
 def put(value: dict) -> str:

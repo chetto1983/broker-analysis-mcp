@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from . import custom
 from .models import ConditionSpec, LevelSpec
 
 CANDLE_LIMIT = 260
@@ -36,7 +37,7 @@ def render(
     levels: list[LevelSpec],
     currency: str,
 ) -> str:
-    groups = list(dict.fromkeys(p["group"] for p in plots if p["pane"] == "lower"))
+    groups = custom.chart_groups(plots)
     ratios = [3.2] + [1.0] * len(groups)
     fig, axes = plt.subplots(
         len(ratios), 1, sharex=True, figsize=(12, 5 + 1.8 * len(groups)),

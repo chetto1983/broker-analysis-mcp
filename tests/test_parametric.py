@@ -145,12 +145,19 @@ class TestBuildAndConditions:
             ([IndicatorSpec(id="x", fn="sma"), IndicatorSpec(id="x", fn="ema")], [], "duplicate"),
             ([IndicatorSpec(id="x", fn="sma", params={"source": "later"})], [], "not an earlier series"),
             ([], [SeriesSpec(id="flag", expr="close > open")], "must be numeric"),
-            ([IndicatorSpec(id=f"r{i}", fn="rsi") for i in range(5)], [], "at most 4 lower panes"),
         ],
     )
     def test_build_rejects_bad_specs(self, prices, specs, series, message) -> None:
         with pytest.raises(SpecError, match=message):
             custom.build(prices, specs, series)
+
+    def test_render_rejects_five_lower_groups_before_creating_a_file(self, prices, tmp_path):
+        ns = {f"r{i}": prices["Close"] for i in range(5)}
+        plots = [{"id": key, "group": key, "pane": "lower", "color": "#2563EB", "guides": []} for key in ns]
+        path = tmp_path / "too-many.png"
+        with pytest.raises(SpecError, match="at most 4 lower panes"):
+            render(str(path), "Too many", prices, ns, plots, [], [], "USD")
+        assert not path.exists()
 
     def test_edge_mode_fires_once_per_episode_state_mode_every_bar(self) -> None:
         ns = {"x": pd.Series([0.0, 5.0, 6.0, 0.0, 7.0, 8.0, 9.0])}
