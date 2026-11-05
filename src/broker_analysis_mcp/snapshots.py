@@ -46,7 +46,16 @@ def _check_session_time(meta: data.Meta, labels: list, provider: dict) -> None:
     if provider.get("instrumentType") == "CRYPTOCURRENCY":
         expected = observed >= last.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
     else:
-        regular = (provider.get("currentTradingPeriod") or {}).get("regular") or {}
+        period = provider.get("currentTradingPeriod")
+        if period is None:
+            period = {}
+        if not isinstance(period, dict):
+            raise ValueError("invalid provider trading-period shape")
+        regular = period.get("regular")
+        if regular is None:
+            regular = {}
+        if not isinstance(regular, dict):
+            raise ValueError("invalid provider regular-session shape")
         start, end = data._aware(regular.get("start")), data._aware(regular.get("end"))
         if start is not None and end is not None and start < end and last.date() in {start.tz_convert(last.tz).date(), end.tz_convert(last.tz).date()}:
             if observed < start:

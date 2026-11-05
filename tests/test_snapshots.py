@@ -339,3 +339,14 @@ def test_invalid_provider_etf_profile_is_domain_error_without_publishing(market,
         acquire(tickers=["SPY"])
     assert not isinstance(error.value, UnexpectedToolError)
     assert not audit.root().exists()
+
+
+@pytest.mark.parametrize("period", [["invalid"], {"regular": ["invalid"]}])
+def test_malformed_snapshot_provider_session_shape_is_domain_error(market, monkeypatch, period):
+    raw = audit.read(acquire()["snapshot_id"])
+    raw["histories"]["AAPL"]["provider_metadata"]["currentTradingPeriod"] = period
+    invalid = audit.put(raw)
+    forbid_yahoo(monkeypatch)
+    with pytest.raises(ToolError, match="snapshot") as error:
+        server.technical_indicators("AAPL", snapshot_id=invalid)
+    assert not isinstance(error.value, UnexpectedToolError)
