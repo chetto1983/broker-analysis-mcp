@@ -4,7 +4,7 @@ import json
 import re
 from datetime import UTC, datetime
 
-from . import custom, data, expr
+from . import custom, data, expr, snapshots
 from .catalog import describe
 from .hooks import home
 from .models import ConditionSpec, HistoryParameters, IndicatorSpec, LevelSpec, SeriesSpec, validate_parameters
@@ -28,7 +28,7 @@ def catalog() -> dict:
 
 def run(
     ticker: str,
-    period: str,
+    period: str | None,
     indicators: list[IndicatorSpec],
     series: list[SeriesSpec],
     conditions: list[ConditionSpec],
@@ -36,10 +36,12 @@ def run(
     chart: bool,
     title: str | None = None,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> tuple[dict, str | None]:
+    dataset, period, include = snapshots.request(snapshot_id, period, "1y", include_incomplete_session, [ticker])
     validate_parameters(HistoryParameters, period=period)
     custom.validate_indicators(indicators)
-    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
+    prices, meta = snapshots.history(dataset, ticker, period, include)
     data.require_prices(prices)
     ns, plots = custom.build(prices, indicators, series, meta.periods_per_year)
     reports, marked = [], []
@@ -60,6 +62,7 @@ def run(
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
         **data.session_metadata(meta),
+        "snapshot_id": snapshot_id,
     }
     png = None
     if chart:

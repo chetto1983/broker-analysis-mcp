@@ -11,11 +11,11 @@ import re
 import tempfile
 from pathlib import Path
 
-from .data import DataError
+from .errors import DataError
 
 
 def root() -> Path:
-    return Path(os.environ.get("BROKER_ANALYSIS_HOME", Path.home() / ".broker-analysis")) / "records"
+    return Path(os.environ.get("BROKER_ANALYSIS_HOME") or os.environ.get("PLUGIN_DATA") or Path.home() / ".broker-analysis") / "records"
 
 
 def canonical(value: dict) -> bytes:

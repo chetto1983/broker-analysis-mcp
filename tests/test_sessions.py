@@ -151,3 +151,37 @@ def test_public_opt_in_is_exposed_and_validated_without_provider(monkeypatch):
     tools = {t.name: t for t in asyncio.run(server.server.list_tools())}
     for name in ("risk_metrics", "technical_indicators", "custom_analysis", "etf_analysis", "portfolio_risk"):
         assert tools[name].input_schema["properties"]["include_incomplete_session"]["default"] is None
+
+
+@pytest.mark.parametrize("report_kind", ["risk", "etf"])
+@pytest.mark.parametrize("open_source", ["benchmark", "fx"])
+def test_comparison_reports_describe_incomplete_benchmark_and_fx(monkeypatch, report_kind, open_source):
+    """Rome has closed while the New York benchmark or required FX still trades."""
+    class Ticker:
+        def __init__(self, ticker):
+            self.ticker = ticker
+        @property
+        def history_metadata(self):
+            timezone = "Europe/Rome" if self.ticker == "FUND" else "America/New_York"
+            open_now = self.ticker == ("BENCH" if open_source == "benchmark" else "USDEUR=X")
+            return {"currency": "EUR" if self.ticker == "FUND" else "USD",
+                    "exchangeTimezoneName": timezone, "instrumentType": "ETF",
+                    "currentTradingPeriod": {"regular": {
+                        "start": pd.Timestamp("2026-11-03T09:00", tz=timezone),
+                        "end": pd.Timestamp("2026-11-03T16:00" if open_now else "2026-11-03T10:00", tz=timezone)}}}
+        def history(self, **kwargs):
+            timezone = "Europe/Rome" if self.ticker == "FUND" else "America/New_York"
+            return frame(timezone=timezone)
+        @property
+        def info(self):
+            return {"quoteType": "ETF", "currency": "EUR"}
+    monkeypatch.setattr(data.yf, "Ticker", Ticker)
+    original = data.history
+    monkeypatch.setattr(data, "history", lambda ticker, period, include: original(
+        ticker, period, include, observed_at=datetime.fromisoformat("2026-11-03T18:00Z")))
+    report = (analysis.risk_report if report_kind == "risk" else analysis.etf_report)(
+        "FUND", benchmark="BENCH", include_incomplete_session=True)
+    assert report["last_bar_complete"] is False
+    assert report["session_sources"]["FUND"]["last_bar_complete"] is True
+    assert report["session_sources"]["BENCH" if open_source == "benchmark" else "USDEUR=X"]["last_bar_complete"] is False
+    assert report["comparison_window"]["end"] == "2026-11-03"

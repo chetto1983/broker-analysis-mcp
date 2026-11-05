@@ -31,6 +31,7 @@ its dependencies and Python 3.13 if it is missing.
 | `portfolio_risk` | Fixed current positions in a base currency: FX-aware returns, correlations, historical and filtered-historical-simulation VaR/ES, component and scenario-frozen marginal ES, named historical/hypothetical stress scenarios. Saves a data snapshot and separate development, validation and monitoring reports. |
 | `model_status` | Champion and EWMA fallback decision as of a saved portfolio run, validation and monitoring QLIKE, VaR coverage diagnostics and last validation date. |
 | `analysis_record` | Hash-verified output, exact snapshot, manifest or one of the three model reports, by record ID. |
+| `market_snapshot` | Acquires one immutable full-OHLCV dataset, optional benchmark, required directional FX and minimal ETF profiles. Returns a shared `snapshot_id` for provider-free replay across reports. |
 | `risk_metrics` | CAGR, close-to-close and range volatility (Garman-Klass, Parkinson, Rogers-Satchell), Sharpe with standard error and t statistic, Probabilistic Sharpe Ratio, Sortino, Omega, max drawdown, CDaR, Calmar, historical and Cornish-Fisher VaR, expected shortfall; against a benchmark also beta and correlation, Bloomberg-style adjusted beta (two years weekly, 0.67 raw + 0.33), Jensen's alpha, Treynor, M², information ratio, tracking error and Morningstar-style up/down capture |
 | `technical_indicators` | Snapshot of SMAs, RSI, MACD, Bollinger, ATR, 52-week range, all with adjustable parameters |
 | `fundamental_ratios` / `peer_comparison` | Multiples, DuPont (ROE, ROA, margins, turnover, equity multiplier), ROIC, working-capital cycle, liquidity, leverage and coverage, payout, revenue CAGR; CAPM cost of equity, WACC, EVA and unlevered beta when the analyst gives the risk-free rate and the equity risk premium; Piotroski F-score, Altman Z and Z'', Beneish M-score with their components (not for banks and insurers); currency conversion between quote and statements |
@@ -59,6 +60,34 @@ crypto waits for the next UTC midnight. Live alert hooks explicitly retain incom
 evaluation. Current fundamental quotes and financial statements keep their existing behavior.
 When the provider supplies only an unmatched next-session schedule, the latest bar is excluded
 as uncertain; this conservative choice can lag by one observed row.
+For comparisons, `comparison_window` names the common calendar and `session_sources` preserves
+each asset/benchmark/FX bar's evidence. The aggregate `last_bar_complete` includes all series
+used by the calculation; a closed fund does not hide an incomplete benchmark or FX bar.
+
+### Shared datasets
+
+Acquire once with `market_snapshot`, for example:
+
+```json
+{"tickers": ["AAPL", "SPY"], "period": "3y", "benchmark": "SPY", "base_currency": "EUR"}
+```
+
+Pass its returned `snapshot_id` to `risk_metrics`, `technical_indicators`, `custom_analysis`,
+`etf_analysis` or `portfolio_risk`. Omit `period` and `include_incomplete_session` on replay to
+inherit the captured values. Explicit conflicts fail. Indicator parameters, confidence and
+CAPM rates may vary while prices stay fixed. A snapshot with period shorter than a report's
+supported range is rejected by that report.
+
+Replay verifies the stored hash and schema, preserves original retrieval/session metadata,
+and never contacts Yahoo, even after an MCP process restart. Missing tickers, benchmark,
+directional FX or an ETF profile produce an error; explicitly acquire a broader dataset to
+extend coverage. Full OHLCV values, numeric dtypes and aware source labels are retained,
+including integer volumes above the exact floating-point integer range. Acquisition returns
+coverage and provenance without returning the full time series to the model.
+
+`market_snapshot` makes an additive local write. Its `snapshot_id` identifies a reusable market
+dataset and is distinct from `portfolio_risk`'s `audit.record_id` or archived `snapshot_hash`.
+The latter remain readable through the existing record tools.
 
 `portfolio_risk` makes additive local audit writes. It is a mutating, non-destructive tool;
 repeated calls add fresh timestamped records, so it is not idempotent. Its Yahoo reads remain
@@ -109,7 +138,12 @@ the fallback reason is explicit. This policy is evaluated on each `portfolio_ris
 
 Every successful run stores its exact price/FX inputs, alignment calendar, request, versions,
 source hashes, forecasts, output and three separate reports under
-`$BROKER_ANALYSIS_HOME/records` (default `~/.broker-analysis/records`).
+the selected data home's `records/` directory. Home precedence is `BROKER_ANALYSIS_HOME`,
+then Aura's identity-scoped `PLUGIN_DATA`, then `~/.broker-analysis`. Charts and hooks use
+the same home; read-only record lookup creates no directories. When upgrading an existing
+Aura installation, explicitly copy old `~/.broker-analysis` contents into its `PLUGIN_DATA`
+before recreating the box, verify hashes and preserve differing files rather than overwriting
+them. There is no automatic legacy lookup or migration process.
 `audit.record_id` identifies the manifest; use `analysis_record` with `section` set to `output`,
 `snapshot`, `development`, `validation` or `monitoring`. Objects use canonical JSON and SHA-256,
 are published atomically and are never overwritten by the application. Every lookup verifies

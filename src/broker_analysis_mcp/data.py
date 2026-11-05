@@ -55,11 +55,25 @@ def session_metadata(meta: Meta | dict, observations=None, date=None) -> dict:
         "last_bar_timestamp", "last_bar_complete", "include_incomplete_session", "completeness_reason",
         "excluded_candidates", "observed_at", "last_trade_timestamp", "session_end_timestamp")}
     if observations is not None and date is not None and date < observations.index[-1]:
+        selected = observations.index.searchsorted(date, side="right") - 1
+        if selected < 0:
+            raise DataError("session provenance has no observation on or before the aligned date")
         labels = observations.attrs.get("source_timestamps", [])
-        details["last_bar_timestamp"] = labels[observations.index.get_loc(date)] if len(labels) == len(observations) else None
+        details["last_bar_timestamp"] = labels[selected] if len(labels) == len(observations) else None
         details["last_bar_complete"] = True
         details["completeness_reason"] = "aligned historical daily bar precedes a later observed session"
     return details
+
+
+def combined_session_metadata(sources: dict[str, dict]) -> dict:
+    """Summarise every series actually used; preserve individual source evidence."""
+    details = next(iter(sources.values())).copy()
+    states = [source["last_bar_complete"] for source in sources.values()]
+    details["last_bar_complete"] = False if False in states else True if all(state is True for state in states) else None
+    details["completeness_reason"] = "completion of all reported asset, benchmark and FX observations"
+    details["excluded_candidates"] = [candidate | {"source": name} for name, source in sources.items()
+                                       for candidate in source["excluded_candidates"]]
+    return details | {"session_sources": sources}
 
 
 def _aware(value) -> pd.Timestamp | None:
@@ -199,6 +213,7 @@ def fx_series(from_ccy: str, to_ccy: str, period: str, include_incomplete_sessio
     prices, meta = history(f"{from_ccy}{to_ccy}=X", period, include_incomplete_session)
     closes = prices["Close"].copy()
     closes.attrs["session_metadata"] = session_metadata(meta)
+    closes.attrs["source_timestamps"] = prices.attrs.get("source_timestamps", [])
     return closes
 
 

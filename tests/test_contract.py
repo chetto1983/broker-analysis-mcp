@@ -20,7 +20,7 @@ from broker_analysis_mcp.models import IndicatorSpec
 
 def test_server_catalog_starts_without_importing_analysis_dependencies():
     probe = subprocess.run([sys.executable, "-c", "import asyncio,sys; from broker_analysis_mcp.server import server; "
-                            "tools=asyncio.run(server.list_tools()); assert len(tools)==14; "
+                            "tools=asyncio.run(server.list_tools()); assert len(tools)==15; "
                             "assert not ({'pandas','numpy','scipy','yfinance','matplotlib'} & sys.modules.keys())"],
                            capture_output=True, text=True)
     assert probe.returncode == 0, probe.stderr
@@ -61,7 +61,8 @@ def test_public_schema_exposes_period_and_numeric_bounds():
     risk = tools["risk_metrics"].input_schema["properties"]
     assert risk["confidence"]["exclusiveMinimum"] == 0
     assert risk["confidence"]["exclusiveMaximum"] == 1
-    assert "1d" not in tools["etf_analysis"].input_schema["properties"]["period"]["enum"]
+    choices = tools["etf_analysis"].input_schema["properties"]["period"]["anyOf"]
+    assert "1d" not in next(choice["enum"] for choice in choices if "enum" in choice)
 
 
 @pytest.mark.parametrize(("tool", "arguments", "field"), [

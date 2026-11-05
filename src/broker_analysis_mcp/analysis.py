@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 
-from . import data, indicators, risk, scores
+from . import data, indicators, risk, scores, snapshots
 from .fundamentals import (
     CapitalInputs,
     Year,
@@ -43,21 +43,35 @@ def _distance(price: float, reference: float) -> float | None:
     return price / reference - 1 if math.isfinite(reference) and reference != 0 else None
 
 
-def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: str, include_incomplete_session: bool = False) -> pd.DataFrame:
+def _in_currency(prices: pd.DataFrame, meta: data.Meta, currency: str, period: str, include_incomplete_session: bool = False,
+                 dataset: snapshots.Dataset | None = None) -> pd.DataFrame:
     """Converts a price frame into another currency with daily Yahoo FX closes."""
     if meta.currency == currency:
         return prices
-    fx = data.fx_series(meta.currency, currency, period, include_incomplete_session).reindex(prices.index).ffill()
+    fx_source = snapshots.fx_series(dataset, meta.currency, currency, period, include_incomplete_session)
+    fx = fx_source.reindex(prices.index).ffill()
     converted = prices.copy()
     for col in ("Open", "High", "Low", "Close"):
         converted[col] = converted[col] * fx
     meta.warnings.append(f"{meta.ticker} converted from {meta.currency} to {currency} with daily FX closes")
+    converted.attrs["fx_source"] = fx_source
     return converted.dropna(subset=["Close"])
 
 
-def utc_offset(timezone: str) -> timedelta | None:
+def _comparison_sessions(prices, meta, benchmark_prices, benchmark_meta, aligned_date):
+    sources = {meta.ticker: data.session_metadata(meta, prices, aligned_date),
+               benchmark_meta.ticker: data.session_metadata(benchmark_meta, benchmark_prices, aligned_date)}
+    fx = benchmark_prices.attrs.get("fx_source")
+    if fx is not None and "session_metadata" in fx.attrs:
+        key = f"{benchmark_meta.currency}{meta.currency}=X"
+        sources[key] = data.session_metadata(fx.attrs["session_metadata"], fx, aligned_date)
+    return sources
+
+
+def utc_offset(timezone: str, observed_at: str | None = None) -> timedelta | None:
     try:
-        return datetime.now(ZoneInfo(timezone)).utcoffset()
+        instant = datetime.fromisoformat(observed_at) if observed_at else datetime.now(ZoneInfo(timezone))
+        return instant.astimezone(ZoneInfo(timezone)).utcoffset()
     except (ZoneInfoNotFoundError, ValueError, OSError):
         return None
 
@@ -122,14 +136,16 @@ def _benchmark_metrics(
 
 def risk_report(
     ticker: str,
-    period: str = "3y",
+    period: str | None = None,
     benchmark: str | None = None,
     rf_annual: float = 0.0,
     alpha: float = 0.95,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> dict:
+    dataset, period, include = snapshots.request(snapshot_id, period, "3y", include_incomplete_session, [ticker], benchmark)
     validate_parameters(RiskParameters, period=period, risk_free_annual=rf_annual, confidence=alpha)
-    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
+    prices, meta = snapshots.history(dataset, ticker, period, include)
     data.require_prices(prices, 3)
     n = meta.periods_per_year
     r = risk.simple_returns(prices["Close"])
@@ -154,12 +170,19 @@ def risk_report(
         "expected_shortfall_1d": _metric(risk.expected_shortfall(r, alpha), "%", "var_historical"),
         "var_cornish_fisher_1d": _metric(risk.var_cornish_fisher(r, alpha), "%", "var_cornish_fisher"),
     }
+    session = data.session_metadata(meta)
+    comparison_window = None
     if benchmark:
-        bench_prices, bench_meta = data.history(benchmark, period, bool(include_incomplete_session))
-        bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, bool(include_incomplete_session))
+        bench_prices, bench_meta = snapshots.history(dataset, benchmark, period, include)
+        bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, include, dataset)
         meta.warnings.extend(bench_meta.warnings)
         common = min(n, bench_meta.periods_per_year)
         metrics |= _benchmark_metrics(prices["Close"], bench_prices["Close"], rf_annual, common, meta.warnings)
+        aligned = risk.aligned(prices["Close"], bench_prices["Close"])
+        sources = _comparison_sessions(prices, meta, bench_prices, bench_meta, aligned.index[-1])
+        sources[meta.ticker] = data.session_metadata(meta)
+        session = data.combined_session_metadata(sources)
+        comparison_window = _window(aligned)
     return {
         "ticker": ticker,
         "currency": meta.currency,
@@ -173,7 +196,9 @@ def risk_report(
         "retrieved_at": meta.retrieved_at,
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), len(r), meta.retrieved_at),
-        **data.session_metadata(meta),
+        **session,
+        "comparison_window": comparison_window,
+        "snapshot_id": snapshot_id,
     }
 
 
@@ -185,11 +210,12 @@ def last_52_weeks(prices: pd.DataFrame) -> pd.DataFrame:
 TECHNICAL_DEFAULTS = TechnicalParameters().model_dump()
 
 
-def technical_report(ticker: str, period: str = "1y", params: dict | None = None,
-                     include_incomplete_session: bool | None = None) -> dict:
+def technical_report(ticker: str, period: str | None = None, params: dict | None = None,
+                     include_incomplete_session: bool | None = None, snapshot_id: str | None = None) -> dict:
+    dataset, period, include = snapshots.request(snapshot_id, period, "1y", include_incomplete_session, [ticker])
     validate_parameters(HistoryParameters, period=period)
     p = validate_parameters(TechnicalParameters, **(params or {})).model_dump()
-    prices, meta = data.history(ticker, period, bool(include_incomplete_session))
+    prices, meta = snapshots.history(dataset, ticker, period, include)
     data.require_prices(prices)
     close = prices["Close"]
     last = float(close.iloc[-1])
@@ -247,6 +273,7 @@ def technical_report(ticker: str, period: str = "1y", params: dict | None = None
         "warnings": meta.warnings,
         **data.report_metadata(len(prices), max(0, len(prices) - 1), meta.retrieved_at),
         **data.session_metadata(meta),
+        "snapshot_id": snapshot_id,
     }
 
 
@@ -386,14 +413,17 @@ def peer_report(tickers: list[str]) -> dict:
     return {"companies": rows, "errors": errors, "references": refs, **data.report_metadata()}
 
 
-def etf_report(ticker: str, benchmark: str, period: str = "3y", include_incomplete_session: bool | None = None) -> dict:
+def etf_report(ticker: str, benchmark: str, period: str | None = None, include_incomplete_session: bool | None = None,
+               snapshot_id: str | None = None) -> dict:
+    dataset, period, include = snapshots.request(snapshot_id, period, "3y", include_incomplete_session, [ticker], benchmark,
+                                                 etf_profile=True)
     validate_parameters(RiskParameters, period=period)
-    profile = data.info(ticker)
+    profile = dataset.profile(ticker) if dataset is not None else data.info(ticker)
     if profile.get("quoteType") != "ETF":
         raise data.DataError(f"{ticker!r} is a {profile.get('quoteType')}, not an ETF")
-    fund_prices, meta = data.history(ticker, period, bool(include_incomplete_session))
-    bench_prices, bench_meta = data.history(benchmark, period, bool(include_incomplete_session))
-    bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, bool(include_incomplete_session))
+    fund_prices, meta = snapshots.history(dataset, ticker, period, include)
+    bench_prices, bench_meta = snapshots.history(dataset, benchmark, period, include)
+    bench_prices = _in_currency(bench_prices, bench_meta, meta.currency, period, include, dataset)
     data.require_prices(fund_prices)
     data.require_prices(bench_prices)
     aligned = risk.aligned(fund_prices["Close"], bench_prices["Close"])
@@ -414,7 +444,7 @@ def etf_report(ticker: str, benchmark: str, period: str = "3y", include_incomple
         metrics["tracking_error"].update(reason=f"insufficient observations: {int(t['weeks'])} weekly returns, need 2; request a longer period",
                                           required_observations=2)
         warnings.append(f"tracking_error: {metrics['tracking_error']['reason']}")
-    if utc_offset(meta.timezone) != utc_offset(bench_meta.timezone):
+    if utc_offset(meta.timezone, meta.observed_at) != utc_offset(bench_meta.timezone, bench_meta.observed_at):
         warnings.append(
             f"fund closes in {meta.timezone}, benchmark in {bench_meta.timezone}: asynchronous closes "
             "inflate the tracking error even on weekly returns (measured: SWDA.MI vs URTH 6.5% weekly, "
@@ -437,5 +467,7 @@ def etf_report(ticker: str, benchmark: str, period: str = "3y", include_incomple
         "retrieved_at": meta.retrieved_at,
         "warnings": warnings,
         **data.report_metadata(len(aligned), int(t["observations"]), meta.retrieved_at),
-        **data.session_metadata(meta),
+        **data.combined_session_metadata(_comparison_sessions(fund_prices, meta, bench_prices, bench_meta, aligned.index[-1])),
+        "comparison_window": _window(aligned),
+        "snapshot_id": snapshot_id,
     }

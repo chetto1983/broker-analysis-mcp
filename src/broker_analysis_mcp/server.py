@@ -60,11 +60,12 @@ def _run(fn: Callable[..., Any], *args: Any) -> Any:
 @server.tool(annotations=READ_ONLY)
 def risk_metrics(
     ticker: str,
-    period: AnalysisPeriod = "3y",
+    period: AnalysisPeriod | None = None,
     benchmark: str | None = None,
     risk_free_annual: AnnualRate = 0.0,
     confidence: Confidence = 0.95,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> dict:
     """Risk and performance of one security or index from daily total-return prices.
 
@@ -79,16 +80,17 @@ def risk_metrics(
     """
     from . import analysis
 
-    return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence, include_incomplete_session)
+    return _run(analysis.risk_report, ticker, period, benchmark, risk_free_annual, confidence, include_incomplete_session, snapshot_id)
 
 
 @server.tool(annotations=LOCAL_AUDIT)
 def portfolio_risk(
     positions: Annotated[list[Position], Field(min_length=1, max_length=30)], portfolio_value: PositiveAmount,
-    base_currency: Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")] = "EUR", period: AnalysisPeriod = "5y",
+    base_currency: Annotated[str, Field(pattern=r"^[A-Za-z]{3}$")] = "EUR", period: AnalysisPeriod | None = None,
     confidence: PortfolioConfidence = 0.975,
     scenarios: Annotated[list[StressScenario], Field(max_length=20)] | None = None,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> dict:
     """Portfolio risk with signed market values in each ticker's quote currency (GBP not GBp).
 
@@ -103,7 +105,7 @@ def portfolio_risk(
     """
     from . import portfolio
 
-    return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios, include_incomplete_session)
+    return _run(portfolio.report, positions, portfolio_value, base_currency, period, confidence, scenarios, include_incomplete_session, snapshot_id)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -132,7 +134,7 @@ def analysis_record(
 @server.tool(annotations=READ_ONLY)
 def technical_indicators(
     ticker: str,
-    period: HistoryPeriod = "1y",
+    period: HistoryPeriod | None = None,
     sma_fast: Lookback = 50,
     sma_slow: Lookback = 200,
     rsi_period: WilderPeriod = 14,
@@ -143,6 +145,7 @@ def technical_indicators(
     bollinger_k: BandWidth = 2.0,
     atr_period: WilderPeriod = 14,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> dict:
     """Snapshot of standard technical indicators with adjustable parameters: close, two SMAs with
     the price's distance from each, RSI, MACD, Bollinger bands, ATR in currency and as % of the
@@ -155,7 +158,7 @@ def technical_indicators(
         sma_fast=sma_fast, sma_slow=sma_slow, rsi_period=rsi_period, macd_fast=macd_fast, macd_slow=macd_slow,
         macd_signal=macd_signal, bollinger_n=bollinger_n, bollinger_k=bollinger_k, atr_period=atr_period,
     )
-    return _run(analysis.technical_report, ticker, period, params, include_incomplete_session)
+    return _run(analysis.technical_report, ticker, period, params, include_incomplete_session, snapshot_id)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -193,13 +196,14 @@ def peer_comparison(tickers: Annotated[list[str], Field(min_length=2, max_length
 
 
 @server.tool(annotations=READ_ONLY)
-def etf_analysis(ticker: str, benchmark: str, period: AnalysisPeriod = "3y", include_incomplete_session: bool | None = None) -> dict:
+def etf_analysis(ticker: str, benchmark: str, period: AnalysisPeriod | None = None,
+                 include_incomplete_session: bool | None = None, snapshot_id: str | None = None) -> dict:
     """ETF cost and replication quality: TER, tracking difference (fund minus benchmark,
     annualised) and tracking error against a benchmark ticker, which is converted to the
     fund's currency. Prefer a total-return index or a reference ETF on the same index."""
     from . import analysis
 
-    return _run(analysis.etf_report, ticker, benchmark, period, include_incomplete_session)
+    return _run(analysis.etf_report, ticker, benchmark, period, include_incomplete_session, snapshot_id)
 
 
 @server.tool(annotations=READ_ONLY)
@@ -216,13 +220,14 @@ def list_indicator_catalog() -> dict:
 def custom_analysis(
     ticker: str,
     indicators: list[IndicatorSpec],
-    period: HistoryPeriod = "1y",
+    period: HistoryPeriod | None = None,
     series: list[SeriesSpec] | None = None,
     conditions: list[ConditionSpec] | None = None,
     levels: list[LevelSpec] | None = None,
     chart: bool = True,
     title: str | None = None,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> list:
     """User-defined technical analysis on one ticker, with an optional chart.
 
@@ -241,12 +246,27 @@ def custom_analysis(
     from . import workbench
 
     result, png = _run(
-        workbench.run, ticker, period, indicators, series or [], conditions or [], levels or [], chart, title, include_incomplete_session
+        workbench.run, ticker, period, indicators, series or [], conditions or [], levels or [], chart, title, include_incomplete_session, snapshot_id
     )
     content: list = [json.dumps(result, ensure_ascii=False)]
     if png:
         content.append(Image(path=png))
     return content
+
+
+@server.tool(annotations=LOCAL_AUDIT)
+def market_snapshot(
+    tickers: Annotated[list[str], Field(min_length=1, max_length=30)], period: HistoryPeriod = "3y",
+    benchmark: str | None = None, base_currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")] | None = None,
+    include_incomplete_session: bool = False,
+) -> dict:
+    """Acquire one immutable full-OHLCV dataset for later reports. Saves local content-addressed
+    data, including the optional benchmark, directional FX needed by comparisons/base currency,
+    and minimal ETF profiles. Reuse snapshot_id with risk/technical/custom/ETF/portfolio tools;
+    omitted period and policy inherit captured values. Missing coverage never fetches on replay."""
+    from . import snapshots
+
+    return _run(snapshots.acquire, tickers, period, benchmark, base_currency, include_incomplete_session)
 
 
 @server.tool(annotations=WRITES_HOOKS)

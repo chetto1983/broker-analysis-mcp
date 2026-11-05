@@ -113,7 +113,7 @@ def test_repeated_runs_preserve_records_and_report_same_market_state(monkeypatch
     dates = pd.bdate_range("2022-01-03", periods=600)
     prices = 100 * np.cumprod(1 + np.random.default_rng(18).normal(0, .01, len(dates)))
     monkeypatch.setattr(data, "history", lambda *args: (pd.DataFrame({"Close": prices}, index=dates),
-                                                       data.Meta("AAPL", "EUR")))
+                                                       data.Meta("AAPL", "EUR", retrieved_at="2026-11-02T23:00:00+00:00")))
     summaries = []
     for _ in range(2):
         assert monitoring.main(["--config", str(config)]) in {0, 3}

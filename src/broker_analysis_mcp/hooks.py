@@ -24,7 +24,7 @@ from urllib.parse import unquote, urlsplit
 
 import pandas as pd
 
-from . import custom, data, expr
+from . import audit, custom, data, expr
 from .catalog import SpecError
 from .models import ConditionSpec, HookAction, IndicatorSpec, SeriesSpec
 
@@ -37,7 +37,7 @@ def _live_history(ticker: str, period: str) -> tuple[pd.DataFrame, data.Meta]:
 
 
 def home() -> Path:
-    path = Path(os.environ.get("BROKER_ANALYSIS_HOME", Path.home() / ".broker-analysis"))
+    path = audit.root().parent
     path.mkdir(parents=True, exist_ok=True)
     return path
 

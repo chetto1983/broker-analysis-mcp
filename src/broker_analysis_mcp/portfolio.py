@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from . import audit, data, forecasting
+from . import audit, data, forecasting, snapshots
 from .models import Position, StressScenario
 
 
@@ -55,9 +55,10 @@ def _metric(value: float, unit: str, ref: str) -> dict:
 
 
 def report(
-    positions: list[Position], portfolio_value: float, base_currency: str = "EUR", period: str = "5y",
+    positions: list[Position], portfolio_value: float, base_currency: str = "EUR", period: str | None = None,
     confidence: float = 0.975, scenarios: list[StressScenario] | None = None,
     include_incomplete_session: bool | None = None,
+    snapshot_id: str | None = None,
 ) -> dict:
     if not 1 <= len(positions) <= 30:
         raise data.DataError("pass 1 to 30 nonzero positions")
@@ -68,6 +69,10 @@ def report(
     if len(base_currency) != 3 or not base_currency.isascii() or not base_currency.isalpha():
         raise data.DataError("base_currency must be a three-letter currency code")
     base_currency = base_currency.upper()
+    if period is not None and period not in {"1y", "2y", "3y", "5y", "10y", "max"}:
+        raise data.DataError("unsupported period")
+    dataset, period, include = snapshots.request(snapshot_id, period, "5y", include_incomplete_session,
+                                                 [position.ticker for position in positions], base_currency=base_currency)
     if period not in {"1y", "2y", "3y", "5y", "10y", "max"}:
         raise data.DataError("unsupported period")
     tickers = [p.ticker for p in positions]
@@ -82,7 +87,7 @@ def report(
                 "FHS uses one common portfolio volatility scale; it does not forecast changing cross-asset correlations.",
                 "Marginal ES freezes scenarios and volatility scales; negative contributions represent hedges."]
     for position in positions:
-        prices, meta = data.history(position.ticker, period, bool(include_incomplete_session))
+        prices, meta = snapshots.history(dataset, position.ticker, period, include)
         source_frames[position.ticker], source_metas[position.ticker] = prices, meta
         if len(meta.currency) != 3 or not meta.currency.isupper():
             raise data.DataError(f"unknown quote currency for {position.ticker}")
@@ -90,7 +95,7 @@ def report(
         metadata[position.ticker] = asdict(meta)
         warnings.extend(meta.warnings)
         if meta.currency != base_currency and meta.currency not in fx:
-            fx[meta.currency] = _series(data.fx_series(meta.currency, base_currency, period, bool(include_incomplete_session)), meta.currency)
+            fx[meta.currency] = _series(snapshots.fx_series(dataset, meta.currency, base_currency, period, include), meta.currency)
     # Intersect prices and FX BEFORE taking returns. No forward filling stale FX or prices.
     frame = pd.concat({**{f"asset:{k}": v for k, v in local.items()},
                        **{f"fx:{k}": v for k, v in fx.items()}}, axis=1).dropna()
@@ -103,13 +108,11 @@ def report(
     if max_gap > 7:
         warnings.append(f"Common observations include gaps of up to {max_gap} calendar days; session risks are not uniform daily risks.")
     dates = [str(d.date()) for d in frame.index]
-    sessions = [data.session_metadata(source_metas[ticker], source_frames[ticker], frame.index[-1]) for ticker in tickers]
-    sessions.extend(data.session_metadata(series.attrs["session_metadata"], series, frame.index[-1])
-                    for series in fx.values() if "session_metadata" in series.attrs)
-    session = sessions[0].copy()
-    session["last_bar_complete"] = (False if any(s["last_bar_complete"] is False for s in sessions)
-                                    else True if all(s["last_bar_complete"] is True for s in sessions) else None)
-    session["include_incomplete_session"] = bool(include_incomplete_session)
+    sessions = {ticker: data.session_metadata(source_metas[ticker], source_frames[ticker], frame.index[-1]) for ticker in tickers}
+    sessions.update({f"{currency}{base_currency}=X": data.session_metadata(series.attrs["session_metadata"], series, frame.index[-1])
+                     for currency, series in fx.items() if "session_metadata" in series.attrs})
+    session = data.combined_session_metadata(sessions)
+    session["include_incomplete_session"] = include
     session["completeness_reason"] = "completion of the last aligned asset and FX sessions"
     base_prices, exposures, holdings = {}, [], []
     for position in positions:
@@ -201,8 +204,9 @@ def report(
                             for b in tickers} for a in tickers},
         "stress_scenarios": stress, "model_status": status, "warnings": warnings,
         "sources": metadata,
-        **data.report_metadata(len(dates), n),
+        **data.report_metadata(len(dates), n, max(meta.retrieved_at for meta in source_metas.values())),
         **session,
+        "snapshot_id": snapshot_id,
         "references": {"fhs_es": "Joint historical return vectors scaled by current/past portfolio sigma; empirical upper-tail loss mean with fractional boundary mass.",
                        "historical": "Unscaled empirical losses on the same FHS sample; inverse empirical CDF VaR.",
                        "variance": "Causal zero-mean second moment; see development report.",

@@ -30,6 +30,25 @@ class HistoryParameters(BaseModel):
     period: HistoryPeriod = "1y"
 
 
+class SnapshotParameters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tickers: Annotated[list[Annotated[str, Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^=._-]+$")]], Field(min_length=1, max_length=30)]
+    period: HistoryPeriod = "3y"
+    benchmark: Annotated[str, Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^=._-]+$")] | None = None
+    base_currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")] | None = None
+    include_incomplete_session: bool = False
+
+    @model_validator(mode="after")
+    def unique_tickers(self):
+        self.tickers = [ticker.upper() for ticker in self.tickers]
+        if len(set(self.tickers)) != len(self.tickers):
+            raise ValueError("snapshot tickers must be unique")
+        if self.benchmark:
+            self.benchmark = self.benchmark.upper()
+        return self
+
+
 class CapitalParameters(BaseModel):
     risk_free_annual: AnnualRate | None = None
     equity_risk_premium: Finite | None = None

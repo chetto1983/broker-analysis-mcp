@@ -133,7 +133,7 @@ def _tail(values: np.ndarray, confidence: float) -> tuple[float, float]:
 def test_live_tools_and_as_of_model_reports(live_portfolio):
     bundle = live_portfolio
     report = bundle["report"]
-    assert len(bundle["tools"]) == 14
+    assert len(bundle["tools"]) == 15
     project = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
     assert bundle["sections"]["snapshot"]["runtime_versions"]["broker-analysis-mcp"] == project["project"]["version"]
     assert bundle["tools"]["portfolio_risk"].annotations.read_only_hint is False
