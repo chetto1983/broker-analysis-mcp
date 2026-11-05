@@ -86,8 +86,8 @@ modify current plugin skills/descriptions, CI and packaging metadata.
 
 **Files:** plugin manifests/immutable launchers, release notes, verification report.
 
-- [ ] Pin the reviewed runtime source commit; tag/push the release and verify CI.
-- [ ] Update/install the local plugin and execute real standalone MCP acceptance on
+- [x] Pin the reviewed runtime source commit; tag/push the release and verify CI.
+- [x] Update/install the local plugin and execute real standalone MCP acceptance on
   the installed artifact, including live acquisition and offline snapshot replay.
-- [ ] Record exact versions, tests, load/fault/restore evidence and limits; commit/push
+- [x] Record exact versions, tests, load/fault/restore evidence and limits; commit/push
   the completed evidence and verify the corresponding CI.

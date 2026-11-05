@@ -93,3 +93,13 @@ resolution pass. Offline wheel/sdist rebuilt. Windows changed-path acceptance is
 passing in 58.40 s, including private-input/configuration redaction and latest-bar nulls.
 No second independent review is claimed. Remaining publication/installation/CI steps
 are deliberately separate from source acceptance.
+
+Task 5: complete. Runtime source 843b681, packaging/tag b043643, local installed/enabled
+version 0.5.0 verified from cache manifest. Native installed launcher: 1000 live-snapshot
+replays, concurrency 8, errors 0, provider operations 0; backup/restore/restart pass.
+Initialization asserts no obsolete product label. Cached startup 3.879 s; first Git
+artifact setup 25.344 s is recorded separately. Main CI 42011264135 and tag CI 42011270598
+both completed success. Full final evidence is in 2026-11-05-operational-closure.md.
+The old Windows cache lock was released by terminating only broker MCP process trees;
+the unchanged install command succeeded immediately afterward. Preloaded current-chat
+tool descriptions require session reload; new MCP sessions verify the installed artifact.

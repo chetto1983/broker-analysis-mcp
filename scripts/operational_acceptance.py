@@ -38,7 +38,8 @@ async def exercise(args, folder):
     elapsed, observations = [], []
     async with stdio_client(params) as (r, w), ClientSession(r, w) as client:
         began = perf_counter()
-        await client.initialize()
+        initialized = await client.initialize()
+        assert "prototype" not in (initialized.instructions or "").lower()
         tools = (await client.list_tools()).tools
         startup = perf_counter() - began
         acquired = await client.call_tool("market_snapshot", {"tickers": [ticker, benchmark], "benchmark": benchmark, "period": "1y"})
