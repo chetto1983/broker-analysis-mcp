@@ -62,6 +62,12 @@ def session_metadata(meta: Meta | dict, observations=None, date=None) -> dict:
         details["last_bar_timestamp"] = labels[selected] if len(labels) == len(observations) else None
         details["last_bar_complete"] = True
         details["completeness_reason"] = "aligned historical daily bar precedes a later observed session"
+        label = _aware(details["last_bar_timestamp"])
+        provider = observations.attrs.get("provider_metadata", {})
+        end = session_bounds(label, provider)[1] if label is not None else None
+        if label is not None and provider.get("instrumentType") == "CRYPTOCURRENCY":
+            end = label.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
+        details["session_end_timestamp"] = end.isoformat() if end is not None else None
     return details
 
 
@@ -94,38 +100,89 @@ def _json_metadata(value):
     return value
 
 
-def _completed_sessions(prices: pd.DataFrame, metadata: dict, observed: pd.Timestamp, include: bool) -> tuple[pd.DataFrame, dict]:
+def _session_labels(prices: pd.DataFrame, metadata: dict) -> pd.DatetimeIndex:
     labels = prices.index
     if labels.tz is None:
         timezone = metadata.get("exchangeTimezoneName")
         if not timezone:
             raise DataError("price history needs an exchange timezone to establish daily sessions")
         labels = labels.tz_localize(timezone)
-    regular = (metadata.get("currentTradingPeriod") or {}).get("regular") or {}
+    return labels
+
+
+def regular_schedule(metadata: dict) -> dict[str, tuple[pd.Timestamp, pd.Timestamp]]:
+    """Validate the minimal dated evidence captured from yfinance's public schedule."""
+    schedule = metadata.get("tradingPeriods", [])
+    if not isinstance(schedule, list):
+        raise DataError("invalid captured session schedule")
+    out = {}
+    for row in schedule:
+        if not isinstance(row, dict) or set(row) != {"date", "start", "end"}:
+            raise DataError("invalid captured session schedule row")
+        start, end = _aware(row["start"]), _aware(row["end"])
+        day = row["date"]
+        if (not isinstance(day, str) or start is None or end is None or start >= end
+                or day != start.date().isoformat() or day in out):
+            raise DataError("invalid captured session schedule date/boundary")
+        out[day] = (start, end)
+    return out
+
+
+def session_bounds(label: pd.Timestamp, metadata: dict, schedule=None) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    schedule = regular_schedule(metadata) if schedule is None else schedule
+    if label.date().isoformat() in schedule:
+        return schedule[label.date().isoformat()]
+    period = metadata.get("currentTradingPeriod") or {}
+    regular = period.get("regular") or {}
     start, end = _aware(regular.get("start")), _aware(regular.get("end"))
-    if start is None or end is None or start >= end:
-        start = end = None
+    # An overnight session's start date can also label the preceding closed bar.
+    # A dated schedule is authoritative; current-period fallback uses its closing date.
+    if start is not None and end is not None and start < end and label.date() == end.tz_convert(label.tz).date():
+        return start, end
+    return None, None
+
+
+def _capture_schedule(raw_metadata, metadata: dict, labels: pd.DatetimeIndex, observed: pd.Timestamp) -> None:
+    candidates = labels[labels <= observed]
+    if metadata.get("instrumentType") == "CRYPTOCURRENCY" or not len(candidates) or session_bounds(candidates[-1], metadata)[0] is not None:
+        return
+    # yfinance 1.7 HistoryMetadata lazily fetches 5d/1h metadata for this public key.
+    # https://github.com/ranaroussi/yfinance/blob/1.7.0/yfinance/scrapers/history.py
+    # Request it only for an unmatched candidate, never by converting the whole mapping.
+    schedule = raw_metadata.get("tradingPeriods")
+    rows = []
+    if isinstance(schedule, pd.DataFrame) and {"start", "end"} <= set(schedule.columns):
+        for label, row in schedule.iterrows():
+            start, end = _aware(row["start"]), _aware(row["end"])
+            if start is not None and end is not None:
+                rows.append({"date": label.date().isoformat(), "start": start.isoformat(), "end": end.isoformat()})
+    metadata["tradingPeriods"] = rows
+    regular_schedule(metadata)
+
+
+def _completed_sessions(prices: pd.DataFrame, metadata: dict, observed: pd.Timestamp, include: bool) -> tuple[pd.DataFrame, dict]:
+    labels = _session_labels(prices, metadata)
+    schedule = regular_schedule(metadata)
     crypto = metadata.get("instrumentType") == "CRYPTOCURRENCY"
     not_future = [i for i, label in enumerate(labels) if label <= observed]
     latest = not_future[-1] if not_future else -1
     keep, states, excluded = [], {}, []
     for i, label in enumerate(labels):
         complete, reason = None, "session metadata does not establish completion"
+        start, end = session_bounds(label, metadata, schedule)
         future = label > observed
         if future:
             reason = "future daily bar excluded"
         elif crypto:
             boundary = label.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
             complete, reason = observed >= boundary, "crypto daily session ends at next UTC midnight"
+        elif start is not None:
+            future = observed < start
+            complete, reason = observed >= end, "provider regular session end"
+            if future:
+                reason = "future regular session excluded"
         elif i < latest:
             complete, reason = True, "a later observed daily session establishes this historical bar"
-        elif start is not None:
-            local_start, local_end = start.tz_convert(labels.tz), end.tz_convert(labels.tz)
-            if label.date() in {local_start.date(), local_end.date()}:
-                future = observed < start
-                complete, reason = observed >= end, "provider regular session end"
-                if future:
-                    reason = "future regular session excluded"
         states[i] = (complete, reason)
         if not future and (complete is True or include):
             keep.append(i)
@@ -139,6 +196,8 @@ def _completed_sessions(prices: pd.DataFrame, metadata: dict, observed: pd.Times
     selected.attrs["source_timestamps"] = [label.isoformat() for label in source_labels]
     selected.attrs["provider_metadata"] = _json_metadata(metadata)
     complete, reason = states[keep[-1]]
+    end = (source_labels[-1].tz_convert("UTC").normalize() + pd.Timedelta(days=1) if crypto
+           else session_bounds(source_labels[-1], metadata, schedule)[1])
     details = {"last_bar_timestamp": source_labels[-1].isoformat(), "last_bar_complete": complete,
                "include_incomplete_session": include, "completeness_reason": reason,
                "excluded_candidates": excluded, "observed_at": observed.isoformat(),
@@ -182,6 +241,7 @@ def history(ticker: str, period: str = "3y", include_incomplete_session: bool = 
     observed = _aware(observed_at or datetime.now(UTC))
     if observed is None:
         raise DataError("observed_at must include a timezone")
+    _capture_schedule(raw_meta, meta, _session_labels(prices, meta), observed)
     prices, details = _completed_sessions(prices, meta, observed, include_incomplete_session)
     require_prices(prices)
     currency = meta.get("currency") or t.info.get("currency") or "?"

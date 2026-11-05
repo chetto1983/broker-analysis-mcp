@@ -42,6 +42,7 @@ def _check_session_time(meta: data.Meta, labels: list, provider: dict) -> None:
     last = data._aware(labels[-1])
     if observed > data._aware(meta.retrieved_at):
         raise ValueError("observation occurs after retrieval")
+    data.regular_schedule(provider)
     expected = None
     if provider.get("instrumentType") == "CRYPTOCURRENCY":
         expected = observed >= last.tz_convert("UTC").normalize() + pd.Timedelta(days=1)
@@ -56,11 +57,14 @@ def _check_session_time(meta: data.Meta, labels: list, provider: dict) -> None:
             regular = {}
         if not isinstance(regular, dict):
             raise ValueError("invalid provider regular-session shape")
-        start, end = data._aware(regular.get("start")), data._aware(regular.get("end"))
-        if start is not None and end is not None and start < end and last.date() in {start.tz_convert(last.tz).date(), end.tz_convert(last.tz).date()}:
+        start, end = data.session_bounds(last, provider)
+        if start is not None:
             if observed < start:
                 raise ValueError("future regular session")
             expected = observed >= end
+        if "tradingPeriods" in provider and ((end is None and meta.session_end_timestamp is not None)
+                                            or data._aware(meta.session_end_timestamp) != end):
+            raise ValueError("session end contradicts captured dated schedule")
     if expected is not None and meta.last_bar_complete is not expected:
         raise ValueError("completion contradicts captured session/observation times")
 

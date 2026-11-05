@@ -106,6 +106,49 @@ def test_acquisition_serializes_full_ohlcv_without_losing_integer_volume(market)
     assert "values" not in json.dumps(result)
 
 
+def test_historical_schedule_is_frozen_and_replays_without_provider(market, monkeypatch):
+    from broker_analysis_mcp import snapshots
+
+    frames, metadata, _, clock = market
+    for ticker in metadata:
+        regular = metadata[ticker]["currentTradingPeriod"]["regular"]
+        metadata[ticker]["tradingPeriods"] = pd.DataFrame(
+            {"start": [regular["start"]], "end": [regular["end"]]}, index=frames[ticker].index[-1:])
+        metadata[ticker]["currentTradingPeriod"] = {"regular": {
+            "start": regular["start"] + pd.Timedelta(days=1), "end": regular["end"] + pd.Timedelta(days=1)}}
+    clock["observed_at"] = datetime.fromisoformat("2026-11-03T08:00Z")
+    snapshot_id = acquire()["snapshot_id"]
+    forbid_yahoo(monkeypatch)
+    clock["observed_at"] = datetime.fromisoformat("2026-11-10T08:00Z")
+    prices, meta = snapshots.load(snapshot_id).history("AAPL")
+    assert str(prices.index[-1].date()) == "2026-11-02"
+    assert meta.session_end_timestamp == "2026-11-02T17:30:00-05:00"
+    assert meta.last_bar_complete is True
+    assert meta.observed_at == "2026-11-03T08:00:00+00:00"
+
+
+@pytest.mark.parametrize("schedule", [42, {}, [{"date": "2026-11-02", "start": "bad", "end": "bad"}],
+                                      [{"date": "2026-11-02", "start": "2026-11-02T17:30Z", "end": "2026-11-02T09:00Z"}]])
+def test_replay_rejects_malformed_captured_historical_schedule(market, schedule):
+    from broker_analysis_mcp import snapshots
+
+    raw = audit.read(acquire()["snapshot_id"])
+    raw["histories"]["AAPL"]["provider_metadata"]["tradingPeriods"] = schedule
+    with pytest.raises(data.DataError, match=r"schedule|session"):
+        snapshots.load(audit.put(raw))
+
+
+def test_replay_rejects_session_end_without_matching_captured_evidence(market):
+    from broker_analysis_mcp import snapshots
+
+    raw = audit.read(acquire()["snapshot_id"])
+    value = raw["histories"]["AAPL"]
+    value["provider_metadata"]["tradingPeriods"] = []
+    value["provider_metadata"]["currentTradingPeriod"] = {}
+    with pytest.raises(data.DataError, match="session end"):
+        snapshots.load(audit.put(raw))
+
+
 def test_snapshot_replay_is_shared_by_all_five_reports_and_frozen(market, monkeypatch):
     result = acquire(tickers=["AAPL", "ENI.MI", "SPY"], benchmark="SPY", base_currency="EUR")
     snapshot_id = result["snapshot_id"]

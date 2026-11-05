@@ -18,13 +18,10 @@ def frame(last="2026-11-03", timezone="America/New_York", count=270):
                          "Close": close, "Volume": np.arange(len(dates), dtype="int64") + 2**53}, index=dates)
 
 
-def provider(monkeypatch, prices, start=None, end=None, instrument="EQUITY", timezone=None):
-    class Metadata(dict):
-        def __getitem__(self, key):
-            assert key != "tradingPeriods", "lazy session metadata must not fetch"
-            return super().__getitem__(key)
-
-    metadata = Metadata(currency="USD", exchangeTimezoneName=timezone or str(prices.index.tz), instrumentType=instrument)
+def provider(monkeypatch, prices, start=None, end=None, instrument="EQUITY", timezone=None, schedule=None):
+    metadata = dict(currency="USD", exchangeTimezoneName=timezone or str(prices.index.tz), instrumentType=instrument)
+    if schedule is not None:
+        metadata["tradingPeriods"] = schedule
     if start and end:
         metadata["currentTradingPeriod"] = {"regular": {"start": pd.Timestamp(start), "end": pd.Timestamp(end)}}
     class Ticker:
@@ -86,6 +83,30 @@ def test_unknown_latest_completion_is_excluded_with_reason(monkeypatch, stale):
     assert str(prices.index[-1].date()) == "2026-11-02"
     assert meta.excluded_candidates[-1]["complete"] is None
     assert "metadata" in meta.excluded_candidates[-1]["reason"]
+
+
+@pytest.mark.parametrize(("day", "offset", "close", "observed", "expected"), [
+    ("2026-11-04", "-05:00", "16:00", "2026-11-05T08:10Z", "2026-11-04"),
+    ("2026-11-04", "-05:00", "13:00", "2026-11-04T17:59Z", "2026-11-03"),
+    ("2026-11-04", "-05:00", "13:00", "2026-11-04T18:00Z", "2026-11-04"),
+    ("2026-03-06", "-05:00", "16:00", "2026-03-09T10:00Z", "2026-03-06"),
+])
+def test_historical_schedule_matches_bar_date_before_next_session(monkeypatch, day, offset, close, observed, expected):
+    prices = frame(day)
+    schedule = pd.DataFrame({"start": [pd.Timestamp(f"{day}T09:30{offset}")],
+                             "end": [pd.Timestamp(f"{day}T{close}{offset}")]}, index=prices.index[-1:])
+    provider(monkeypatch, prices, "2026-11-05T09:30-05:00", "2026-11-05T16:00-05:00", schedule=schedule)
+    selected, meta = data.history("A", observed_at=datetime.fromisoformat(observed))
+    assert str(selected.index[-1].date()) == expected
+    assert meta.last_bar_complete is True
+    assert meta.session_end_timestamp == (f"{day}T{close}:00{offset}" if expected == day else None)
+    assert selected.attrs["provider_metadata"]["tradingPeriods"][0]["date"] == day
+
+
+def test_unmatched_bar_does_not_borrow_another_session_end(monkeypatch):
+    provider(monkeypatch, frame(), "2026-11-04T09:30-05:00", "2026-11-04T16:00-05:00")
+    _, meta = data.history("A", observed_at=datetime.fromisoformat("2026-11-04T10:00Z"))
+    assert meta.session_end_timestamp is None
 
 
 def test_same_completed_frame_reaches_every_report(monkeypatch, tmp_path):
